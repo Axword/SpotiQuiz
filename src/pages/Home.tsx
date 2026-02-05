@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Music, Mic2, Users, Play, LogIn } from 'lucide-react';
 import { useGameStore } from '../store/gameStore';
-import { AUTH_URL, getTokenFromUrl } from '../lib/spotify';
+import { generateAuthURL, exchangeCodeForToken, getTokenFromUrl } from '../lib/spotify';
 import { Button } from '../components/ui/Button';
 import { Layout } from '../components/Layout';
 import { Card } from '../components/ui/Card';
@@ -14,12 +14,30 @@ const Home = () => {
   const t = translations[language];
   const [joinCode, setJoinCode] = useState("");
   const [showJoinInput, setShowJoinInput] = useState(false);
+  const [authUrl, setAuthUrl] = useState<string>("");
 
   useEffect(() => {
-    const hash = getTokenFromUrl();
-    if (hash.access_token) {
-      setToken(hash.access_token);
-      window.location.hash = "";
+    // Generate auth URL on component mount
+    const initAuthUrl = async () => {
+      const url = await generateAuthURL();
+      setAuthUrl(url);
+    };
+    initAuthUrl();
+
+    // Handle authorization code from redirect
+    const params = getTokenFromUrl();
+    if (params.code) {
+      const handleTokenExchange = async () => {
+        const result = await exchangeCodeForToken(params.code);
+        if (result) {
+          setToken(result.access_token);
+          // Clear the URL
+          window.history.replaceState({}, document.title, window.location.pathname);
+        } else {
+          console.error('Failed to exchange code for token');
+        }
+      };
+      handleTokenExchange();
     }
   }, [setToken]);
 
@@ -109,12 +127,14 @@ const Home = () => {
               <p className="text-gray-500 text-sm">
                 {t.guest} {t.or} {t.loginSpotify}
               </p>
-              <a href={AUTH_URL}>
-                <Button size="lg" className="gap-3 bg-[#1DB954] hover:bg-[#1ed760] text-black font-bold px-8">
-                  <Play className="w-5 h-5 fill-current" />
-                  {t.loginSpotify}
-                </Button>
-              </a>
+              {authUrl && (
+                <a href={authUrl}>
+                  <Button size="lg" className="gap-3 bg-[#1DB954] hover:bg-[#1ed760] text-black font-bold px-8">
+                    <Play className="w-5 h-5 fill-current" />
+                    {t.loginSpotify}
+                  </Button>
+                </a>
+              )}
             </div>
           ) : (
              <div className="text-green-400 font-medium flex items-center justify-center gap-2">

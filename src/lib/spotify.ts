@@ -1,9 +1,9 @@
 import axios from 'axios';
 
 const CLIENT_ID = '7826777c157c43c080e538950ce5346e';
-const REDIRECT_URI = window.location.hostname === 'localhost' 
-  ? 'http://localhost:8080/home' 
-  : 'https://spoti-quiz-omega.vercel.app/home'; // Changed to match one of the allowed URIs
+const REDIRECT_URI = `${window.location.origin}/home`;
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://127.0.0.1:8000';
+
 const SCOPES = [
   'user-read-private',
   'user-read-email',
@@ -11,10 +11,156 @@ const SCOPES = [
   'playlist-read-collaborative'
 ];
 
-export const AUTH_URL = `https://accounts.spotify.com/authorize?client_id=${CLIENT_ID}&response_type=token&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&scope=${encodeURIComponent(SCOPES.join(' '))}&show_dialog=true`;
+// PKCE: Generate code verifier (43-128 characters from allowed set)
+const generateCodeVerifier = (): string => {
+  const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~';
+  const length = 64; // Use 64 for good entropy
+  const values = crypto.getRandomValues(new Uint8Array(length));
+  return Array.from(values, (byte) => possible[byte % possible.length]).join('');
+};
+
+// PKCE: Generate code challenge
+const generateCodeChallenge = async (codeVerifier: string): Promise<string> => {
+  const encoder = new TextEncoder();
+  const data = encoder.encode(codeVerifier);
+  const digest = await crypto.subtle.digest('SHA-256', data);
+  const base64 = btoa(String.fromCharCode(...new Uint8Array(digest)));
+  return base64
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=/g, '');
+};
+
+// Store code verifier in session storage
+const storeCodeVerifier = (verifier: string) => {
+  sessionStorage.setItem('spotify_code_verifier', verifier);
+};
+
+const getCodeVerifier = (): string | null => {
+  return sessionStorage.getItem('spotify_code_verifier');
+};
+
+const clearCodeVerifier = () => {
+  sessionStorage.removeItem('spotify_code_verifier');
+};
+
+// Extract playlist ID from Spotify URL
+export const extractPlaylistIdFromUrl = (url: string): string | null => {
+  try {
+    // Handle different Spotify URL formats:
+    // https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M
+    // spotify:playlist:37i9dQZF1DXcBWIGoYBM5M
+    // Just the ID: 37i9dQZF1DXcBWIGoYBM5M
+    
+    // If it's just an ID
+    if (url.length === 22 && !url.includes('/') && !url.includes(':')) {
+      return url;
+    }
+    
+    // If it's a spotify URI
+    if (url.startsWith('spotify:playlist:')) {
+      return url.split(':')[2];
+    }
+    
+    // If it's a URL
+    const urlObj = new URL(url);
+    const match = urlObj.pathname.match(/\/playlist\/([a-zA-Z0-9]+)/);
+    if (match) {
+      return match[1];
+    }
+    
+    return null;
+  } catch {
+    return null;
+  }
+};
+
+// Generate Authorization URL with PKCE
+export const generateAuthURL = async (): Promise<string> => {
+  const codeVerifier = generateCodeVerifier();
+  const codeChallenge = await generateCodeChallenge(codeVerifier);
+  storeCodeVerifier(codeVerifier);
+
+  const params = new URLSearchParams({
+    client_id: CLIENT_ID,
+    response_type: 'code',
+    redirect_uri: REDIRECT_URI,
+    scope: SCOPES.join(' '),
+    code_challenge_method: 'S256',
+    code_challenge: codeChallenge,
+    show_dialog: 'true'
+  });
+
+  return `https://accounts.spotify.com/authorize?${params.toString()}`;
+};
+
+// Exchange authorization code for access token
+export const exchangeCodeForToken = async (code: string): Promise<{ access_token: string; refresh_token?: string; expires_in: number } | null> => {
+  const codeVerifier = getCodeVerifier();
+  
+  if (!codeVerifier) {
+    console.error('Code verifier not found');
+    return null;
+  }
+
+  try {
+    const response = await axios.post(
+      'https://accounts.spotify.com/api/token',
+      new URLSearchParams({
+        grant_type: 'authorization_code',
+        code: code,
+        redirect_uri: REDIRECT_URI,
+        client_id: CLIENT_ID,
+        code_verifier: codeVerifier
+      }),
+      {
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded'
+        }
+      }
+    );
+
+    clearCodeVerifier();
+    return {
+      access_token: response.data.access_token,
+      refresh_token: response.data.refresh_token,
+      expires_in: response.data.expires_in
+    };
+  } catch (error) {
+    console.error('Error exchanging code for token:', error);
+    return null;
+  }
+};
+
+// Refresh access token
+export const refreshAccessToken = async (refreshToken: string): Promise<{ access_token: string; expires_in: number } | null> => {
+  try {
+    const response = await axios.post(
+      'https://accounts.spotify.com/api/token',
+      new URLSearchParams({
+        grant_type: 'refresh_token',
+        refresh_token: refreshToken,
+        client_id: CLIENT_ID
+      }),
+      {
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded'
+        }
+      }
+    );
+
+    return {
+      access_token: response.data.access_token,
+      expires_in: response.data.expires_in
+    };
+  } catch (error) {
+    console.error('Error refreshing token:', error);
+    return null;
+  }
+};
 
 export const getTokenFromUrl = () => {
-  return window.location.hash
+  return window.location.search
     .substring(1)
     .split('&')
     .reduce((initial: any, item) => {
@@ -28,8 +174,8 @@ export interface SpotifyTrack {
   id: string;
   name: string;
   artist: string;
-  preview_url: string | null;
   image?: string;
+  uri: string;  // For Web Playback SDK
 }
 
 export interface SpotifyPlaylist {
@@ -41,86 +187,19 @@ export interface SpotifyPlaylist {
   };
 }
 
-// Fallback Mock Data with working previews (hopefully)
-// Using standard clear examples if possible, or just a structure that won't crash.
-// Note: Many official Spotify preview URLs are 404ing now due to policy changes.
-// We will try to filter strictly for valid ones in the real API.
-const MOCK_TRACKS: SpotifyTrack[] = [
-  {
-    id: '1',
-    name: 'Blinding Lights',
-    artist: 'The Weeknd',
-    preview_url: 'https://p.scdn.co/mp3-preview/0d398e09f57f5c7659549f60e909564883907705?cid=7826777c157c43c080e538950ce5346e', 
-    image: 'https://i.scdn.co/image/ab67616d0000b2738863bc11d2aa12b54f5aeb36'
-  },
-  {
-    id: '2',
-    name: 'Shape of You',
-    artist: 'Ed Sheeran',
-    preview_url: 'https://p.scdn.co/mp3-preview/7339548839a2633321138b1d018ce3731e646ebc?cid=7826777c157c43c080e538950ce5346e',
-    image: 'https://i.scdn.co/image/ab67616d0000b273ba5db46f4b838ef6027e6f96'
-  },
-  {
-    id: '3',
-    name: 'Dance Monkey',
-    artist: 'Tones And I',
-    preview_url: 'https://p.scdn.co/mp3-preview/5443d3b730594e9f9099951860642f4c7d0d046c?cid=7826777c157c43c080e538950ce5346e',
-    image: 'https://i.scdn.co/image/ab67616d0000b27311c633a6977e231e5f8f553f'
-  },
-  {
-    id: '4',
-    name: 'Levitating',
-    artist: 'Dua Lipa',
-    preview_url: 'https://p.scdn.co/mp3-preview/0d398e09f57f5c7659549f60e909564883907705?cid=7826777c157c43c080e538950ce5346e', 
-    image: 'https://i.scdn.co/image/ab67616d0000b273bd26ede1ae693270054d4803'
-  },
-  {
-    id: '5',
-    name: 'Bad Guy',
-    artist: 'Billie Eilish',
-    preview_url: 'https://p.scdn.co/mp3-preview/2b92fb13589b9d7580662d559828d506992d9d15?cid=7826777c157c43c080e538950ce5346e',
-    image: 'https://i.scdn.co/image/ab67616d0000b27350a3147b4edd7701a876c6b9'
-  },
-  {
-    id: '6',
-    name: 'Watermelon Sugar',
-    artist: 'Harry Styles',
-    preview_url: 'https://p.scdn.co/mp3-preview/f4f9104b901b8026786a550d55e0942488a033f2?cid=7826777c157c43c080e538950ce5346e',
-    image: 'https://i.scdn.co/image/ab67616d0000b2737a1c49b6d80c3e981655b390'
-  },
-  {
-    id: '7',
-    name: 'Don\'t Start Now',
-    artist: 'Dua Lipa',
-    preview_url: 'https://p.scdn.co/mp3-preview/616858e747a0eb527443d3b730594e9f90999518?cid=7826777c157c43c080e538950ce5346e',
-    image: 'https://i.scdn.co/image/ab67616d0000b273bd26ede1ae693270054d4803'
-  },
-  {
-    id: '8',
-    name: 'Circles',
-    artist: 'Post Malone',
-    preview_url: 'https://p.scdn.co/mp3-preview/5443d3b730594e9f9099951860642f4c7d0d046c?cid=7826777c157c43c080e538950ce5346e', 
-    image: 'https://i.scdn.co/image/ab67616d0000b2739478c87599550ddc9b5db512'
-  },
-  {
-    id: '9',
-    name: 'Memories',
-    artist: 'Maroon 5',
-    preview_url: 'https://p.scdn.co/mp3-preview/0d398e09f57f5c7659549f60e909564883907705?cid=7826777c157c43c080e538950ce5346e',
-    image: 'https://i.scdn.co/image/ab67616d0000b273c3917452d3c7b6070a931a31'
-  },
-  {
-    id: '10',
-    name: 'Senorita',
-    artist: 'Shawn Mendes',
-    preview_url: 'https://p.scdn.co/mp3-preview/7339548839a2633321138b1d018ce3731e646ebc?cid=7826777c157c43c080e538950ce5346e',
-    image: 'https://i.scdn.co/image/ab67616d0000b2733482329c29486c4293f77343'
-  }
-];
+// No mock data - always fetch real data from backend or Spotify API
 
-export const searchPlaylists = async (token: string, query: string): Promise<SpotifyPlaylist[]> => {
-  if (!token) return [];
+export const searchPlaylists = async (token: string | null, query: string): Promise<SpotifyPlaylist[]> => {
   try {
+    // Use backend for public search (works without token)
+    if (!token) {
+      const response = await axios.get(`${BACKEND_URL}/api/search/playlists`, {
+        params: { q: query, limit: 10 }
+      });
+      return response.data.playlists || [];
+    }
+
+    // Use Spotify API directly for user search (requires token)
     const response = await axios.get(`https://api.spotify.com/v1/search`, {
       headers: { Authorization: `Bearer ${token}` },
       params: { q: query, type: 'playlist', limit: 10, market: 'PL' }
@@ -137,8 +216,20 @@ export const searchPlaylists = async (token: string, query: string): Promise<Spo
   }
 };
 
-export const getUserPlaylists = async (token: string): Promise<SpotifyPlaylist[]> => {
-  if (!token) return [];
+export const getUserPlaylists = async (token: string | null): Promise<SpotifyPlaylist[]> => {
+  if (!token) {
+    // Return featured playlists from backend for guests
+    try {
+      const response = await axios.get(`${BACKEND_URL}/api/public-playlists`, {
+        params: { limit: 20 }
+      });
+      return response.data.playlists || [];
+    } catch (error) {
+      console.error("Error fetching featured playlists", error);
+      return [];
+    }
+  }
+
   try {
     const response = await axios.get(`https://api.spotify.com/v1/me/playlists`, {
       headers: { Authorization: `Bearer ${token}` },
@@ -156,57 +247,62 @@ export const getUserPlaylists = async (token: string): Promise<SpotifyPlaylist[]
   }
 };
 
-export const getFeaturedPlaylists = async (token: string): Promise<SpotifyPlaylist[]> => {
-  if (!token) return [];
+export const getFeaturedPlaylists = async (token: string | null): Promise<SpotifyPlaylist[]> => {
+  console.log('[getFeaturedPlaylists] Starting with token:', !!token);
   try {
-    const response = await axios.get(`https://api.spotify.com/v1/browse/featured-playlists`, {
-      headers: { Authorization: `Bearer ${token}` },
-      params: { limit: 10, country: 'PL' }
+    // Use backend for featured playlists (works without user token)
+    console.log('[getFeaturedPlaylists] Fetching from backend:', BACKEND_URL);
+    const response = await axios.get(`${BACKEND_URL}/api/public-playlists`, {
+      params: { limit: 20 }
     });
-    return response.data.playlists.items.map((item: any) => ({
-      id: item.id,
-      name: item.name,
-      image: item.images[0]?.url,
-      tracks: item.tracks
-    }));
+    console.log('[getFeaturedPlaylists] Got response:', response.data.playlists?.length || 0, 'playlists');
+    return response.data.playlists || [];
   } catch (error) {
     console.error("Error fetching featured playlists", error);
     return [];
   }
 };
 
-export const getPlaylistTracks = async (token: string, playlistId: string): Promise<SpotifyTrack[]> => {
-  if (!token) return MOCK_TRACKS;
+export const getPlaylistTracks = async (token: string | null, playlistId: string): Promise<SpotifyTrack[]> => {
+  console.log('[getPlaylistTracks] Starting with playlistId:', playlistId, 'token:', !!token);
+  
+  if (!token) {
+    throw new Error('Authentication required to fetch playlist tracks');
+  }
+
+  // If logged in, try Spotify API directly
   try {
+    console.log('[getPlaylistTracks] Using Spotify API directly with user token');
     let tracks: SpotifyTrack[] = [];
-    let nextUrl = `https://api.spotify.com/v1/playlists/${playlistId}/tracks?limit=50&market=PL`;
+    let nextUrl = `https://api.spotify.com/v1/playlists/${playlistId}/tracks?limit=50&market=US`;
     
-    // Fetch up to 250 tracks (5 pages) to find enough previews
     let pages = 0;
-    while (nextUrl && pages < 5) {
+    while (nextUrl && pages < 10) {
       const response = await axios.get(nextUrl, {
         headers: { Authorization: `Bearer ${token}` }
       });
       
       const validTracks = response.data.items
         .map((item: any) => item.track)
-        .filter((track: any) => track && track.preview_url) // CRITICAL: Only take tracks with previews
+        .filter((track: any) => track)
         .map((track: any) => ({
           id: track.id,
           name: track.name,
           artist: track.artists.map((a: any) => a.name).join(', '),
-          preview_url: track.preview_url,
+          uri: track.uri,
           image: track.album.images[0]?.url
         }));
         
       tracks = [...tracks, ...validTracks];
       nextUrl = response.data.next;
       pages++;
+      console.log('[getPlaylistTracks] Page', pages, 'got', validTracks.length, 'tracks');
     }
     
+    console.log('[getPlaylistTracks] Total tracks from Spotify:', tracks.length);
     return tracks;
   } catch (error) {
-    console.error("Error fetching tracks", error);
-    return MOCK_TRACKS;
+    console.error("Error fetching tracks from Spotify API:", error);
+    throw error;
   }
 };

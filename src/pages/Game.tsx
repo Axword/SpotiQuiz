@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useGameStore } from '../store/gameStore';
 import { Layout } from '../components/Layout';
 import { Button } from '../components/ui/Button';
-import { Clock, SkipForward, Play, Pause, Check, X, Search, LogOut, Volume2 } from 'lucide-react';
+import { Clock, SkipForward, Play, Pause, Check, X, Search, LogOut, Volume2, Users } from 'lucide-react';
 import { translations } from '../lib/translations';
 import { playSfx } from '../lib/sfx';
 
@@ -34,31 +34,11 @@ const Game = () => {
   const [typedAnswer, setTypedAnswer] = useState('');
   const [filteredTracks, setFilteredTracks] = useState<any[]>([]);
   const [showUnmuteOverlay, setShowUnmuteOverlay] = useState(false);
+  const [isHost, setIsHost] = useState(false);
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
-
-  // Initialize Audio Logic
-  useEffect(() => {
-    // Clean up previous audio instance
-    if (audioRef.current) {
-      audioRef.current.pause();
-      audioRef.current = null;
-    }
-
-    // Create new instance
-    const audio = new Audio();
-    audio.volume = 0.5;
-    audioRef.current = audio;
-
-    return () => {
-      if (audioRef.current) {
-        audioRef.current.pause();
-        audioRef.current.src = "";
-      }
-      stopTimer();
-    };
-  }, []);
+  const playerRef = useRef<any>(null);
 
   const stopTimer = () => {
     if (timerRef.current) {
@@ -80,22 +60,6 @@ const Game = () => {
     }, 1000);
   };
 
-  const playAudio = async (url: string) => {
-    if (!audioRef.current) return;
-    
-    try {
-      audioRef.current.src = url;
-      audioRef.current.load();
-      await audioRef.current.play();
-      setIsPlaying(true);
-      setShowUnmuteOverlay(false);
-    } catch (error) {
-      console.warn("Autoplay prevented:", error);
-      setIsPlaying(false);
-      setShowUnmuteOverlay(true);
-    }
-  };
-
   // Round Logic
   useEffect(() => {
     if (!isGameActive || currentRound > roundsCount) {
@@ -112,7 +76,16 @@ const Game = () => {
     setIsRoundOver(false);
     setTypedAnswer('');
     setCorrectAnswer(null);
+    
+    // Reset Audio
     setIsPlaying(false);
+    setShowUnmuteOverlay(false);
+    
+    // Initialize Spotify Web Playback SDK for all modes (requires login)
+    // @ts-ignore - Spotify Web Playback SDK is loaded globally
+    if (window.Spotify) {
+      initializeSpotifyPlayer(track.uri);
+    }
 
     // Prepare Choices
     if (gameMode === 'ABCD') {
@@ -125,15 +98,79 @@ const Game = () => {
         setFilteredTracks(tracks.sort((a, b) => a.name.localeCompare(b.name)));
     }
 
-    // Play Audio
-    if (track.preview_url) {
-      playAudio(track.preview_url);
-    }
-
     startTimer();
 
     return () => stopTimer();
   }, [currentRound, tracks, isGameActive]);
+
+  // Initialize Spotify Web Playback SDK
+  const initializeSpotifyPlayer = async (uri: string) => {
+    try {
+      const token = localStorage.getItem('spotify_access_token');
+      if (!token) return;
+
+      // @ts-ignore - Spotify Web Playback SDK is loaded globally
+      const player = new window.Spotify.Player({
+        name: 'SpotiQuiz Player',
+        getOAuthToken: (cb: any) => { cb(token); },
+        volume: 0.5
+      });
+
+      // Error handling
+      player.addListener('initialization_error', ({ message }: any) => {
+        console.error('Spotify initialization error:', message);
+      });
+
+      player.addListener('authentication_error', ({ message }: any) => {
+        console.error('Spotify authentication error:', message);
+      });
+
+      player.addListener('account_error', ({ message }: any) => {
+        console.error('Spotify account error:', message);
+      });
+
+      player.addListener('playback_error', ({ message }: any) => {
+        console.error('Spotify playback error:', message);
+      });
+
+      // Playback events
+      player.addListener('player_state_changed', (state: any) => {
+        if (state) {
+          setIsPlaying(state.paused === false);
+        }
+      });
+
+      // Ready
+      player.addListener('ready', ({ device_id }: any) => {
+        console.log('Spotify player ready:', device_id);
+        playerRef.current = player;
+        
+        // Start playback
+        player.activateElement().then(() => {
+          player.connect();
+          player.resume();
+        });
+      });
+
+      // Connect to Spotify
+      await player.connect();
+
+    } catch (error) {
+      console.error('Error initializing Spotify player:', error);
+    }
+  };
+
+  const playSpotifyTrack = async (uri: string) => {
+    if (!playerRef.current) return;
+
+    try {
+      await playerRef.current.addTracksToQueue([uri]);
+      await playerRef.current.skipToNext();
+      setIsPlaying(true);
+    } catch (error) {
+      console.error('Error playing Spotify track:', error);
+    }
+  };
 
   const handleTimeUp = () => {
     stopTimer();
@@ -209,17 +246,12 @@ const Game = () => {
   };
 
   const togglePlay = async () => {
-    if (!audioRef.current) return;
-    if (isPlaying) {
-      audioRef.current.pause();
-      setIsPlaying(false);
-    } else {
-      try {
-        await audioRef.current.play();
-        setIsPlaying(true);
-        setShowUnmuteOverlay(false);
-      } catch (e) {
-        console.error(e);
+    if (playerRef.current) {
+      // Use Spotify Web Playback SDK
+      if (isPlaying) {
+        await playerRef.current.pause();
+      } else {
+        await playerRef.current.resume();
       }
     }
   };
@@ -238,12 +270,15 @@ const Game = () => {
     navigate('/');
   };
 
-  const handleForceStart = () => {
-    if (audioRef.current) {
-        audioRef.current.play().then(() => {
-            setIsPlaying(true);
-            setShowUnmuteOverlay(false);
-        }).catch(e => console.error(e));
+  const handleForceStart = async () => {
+    if (playerRef.current) {
+      try {
+        await playerRef.current.resume();
+        setIsPlaying(true);
+        setShowUnmuteOverlay(false);
+      } catch (e) {
+        console.error("Spotify manual start failed", e);
+      }
     }
   };
 
@@ -251,10 +286,30 @@ const Game = () => {
   // RENDER
   // --------------------------------------------------------------------------
 
+  // Hidden Audio Element
+  const AudioElement = (
+      <audio 
+          ref={audioRef} 
+          onError={(e) => {
+              const target = e.target as HTMLAudioElement;
+              console.error("Audio tag error:", e, "Src:", target.src, "Error Code:", target.error?.code, "Message:", target.error?.message);
+              // If source is not supported, we might try to just log it for now
+              if (target.error?.code === MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED) {
+                  console.warn("Media Error: Source not supported. This might be due to a dead URL or codec issue.");
+              }
+              setShowUnmuteOverlay(true);
+          }}
+          onCanPlay={() => {
+              // console.log("Audio ready to play");
+          }}
+      />
+  );
+
   // Host Mode
   if (roomType === 'LocalHost') {
     return (
         <Layout>
+            {AudioElement}
             <div className="absolute top-20 left-4 z-40">
                 <Button variant="ghost" onClick={handleExit} className="text-gray-400 hover:text-white bg-black/50 backdrop-blur-md">
                     <LogOut className="w-5 h-5 mr-2" />
@@ -331,6 +386,7 @@ const Game = () => {
   // Solo Mode
   return (
     <Layout>
+      {AudioElement}
       <div className="absolute top-24 left-4 z-40">
          <Button variant="ghost" onClick={handleExit} className="text-gray-400 hover:text-white bg-black/50 backdrop-blur-md">
              <LogOut className="w-5 h-5 mr-2" />

@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { SpotifyTrack } from '../lib/spotify';
+import { SpotifyTrack, refreshAccessToken } from '../lib/spotify';
 import { Language } from '../lib/translations';
 
 export type GameMode = 'ABCD' | 'Type' | 'List';
@@ -8,6 +8,8 @@ export type GameStatus = 'setup' | 'lobby' | 'playing' | 'results';
 
 interface GameState {
   token: string | null;
+  refreshToken: string | null;
+  tokenExpiresAt: number | null;
   user: any | null;
   
   // Settings
@@ -27,13 +29,14 @@ interface GameState {
   tracks: SpotifyTrack[];
   currentRound: number;
   score: number;
-  isGameActive: boolean; // Computed or simplified status
+  isGameActive: boolean;
   isRoundActive: boolean;
   
   // Actions
-  setToken: (token: string) => void;
+  setToken: (token: string, refreshToken?: string, expiresIn?: number) => void;
   setUser: (user: any) => void;
   setLanguage: (lang: Language) => void;
+  getValidToken: () => Promise<string | null>;
   setGameSettings: (settings: { 
     gameMode?: GameMode; 
     roomType?: RoomType;
@@ -46,6 +49,7 @@ interface GameState {
   createRoom: () => void;
   joinRoom: (code: string) => void;
   leaveRoom: () => void;
+  setIsHost: (isHost: boolean) => void;
   
   setTracks: (tracks: SpotifyTrack[]) => void;
   startGame: () => void;
@@ -54,8 +58,10 @@ interface GameState {
   resetGame: () => void;
 }
 
-export const useGameStore = create<GameState>((set) => ({
+export const useGameStore = create<GameState>((set, get) => ({
   token: null,
+  refreshToken: null,
+  tokenExpiresAt: null,
   user: null,
   
   language: 'pl',
@@ -75,9 +81,44 @@ export const useGameStore = create<GameState>((set) => ({
   isGameActive: false,
   isRoundActive: false,
   
-  setToken: (token) => set({ token }),
+  setToken: (token, refreshToken, expiresIn) => {
+    const expiresAt = expiresIn ? Date.now() + expiresIn * 1000 : null;
+    set({ token, refreshToken: refreshToken || null, tokenExpiresAt: expiresAt });
+    
+    // Store tokens in session storage for persistence
+    sessionStorage.setItem('spotify_token', token);
+    if (refreshToken) {
+      sessionStorage.setItem('spotify_refresh_token', refreshToken);
+    }
+    if (expiresAt) {
+      sessionStorage.setItem('spotify_token_expires_at', expiresAt.toString());
+    }
+  },
+  
   setUser: (user) => set({ user }),
   setLanguage: (language) => set({ language }),
+  
+  getValidToken: async () => {
+    const state = get();
+    
+    // Check if token is still valid
+    if (state.token && state.tokenExpiresAt && Date.now() < state.tokenExpiresAt) {
+      return state.token;
+    }
+    
+    // Try to refresh token
+    if (state.refreshToken) {
+      const result = await refreshAccessToken(state.refreshToken);
+      if (result) {
+        get().setToken(result.access_token, state.refreshToken, result.expires_in);
+        return result.access_token;
+      }
+    }
+    
+    // No valid token available
+    return null;
+  },
+  
   setGameSettings: (settings) => set((state) => ({ ...state, ...settings })),
   
   createRoom: () => {
@@ -95,6 +136,8 @@ export const useGameStore = create<GameState>((set) => ({
     gameStatus: 'setup',
     roomType: 'Solo'
   }),
+  
+  setIsHost: (isHost) => set({ isHost }),
 
   setTracks: (tracks) => set({ tracks }),
   
@@ -120,6 +163,6 @@ export const useGameStore = create<GameState>((set) => ({
     score: 0,
     isRoundActive: false,
     tracks: [],
-    roomCode: null // Reset room on full reset, or keep it? Usually full reset goes to home.
+    roomCode: null
   })
 }));
