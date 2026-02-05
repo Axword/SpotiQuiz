@@ -1,5 +1,6 @@
 import React from 'react';
 import { twMerge } from 'tailwind-merge';
+import { playSfx } from '../../lib/sfx';
 
 interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: 'primary' | 'secondary' | 'ghost' | 'danger';
@@ -13,6 +14,7 @@ export function Button({
   variant = 'primary', 
   size = 'md',
   fullWidth = false,
+  onClick,
   ...props 
 }: ButtonProps) {
   const baseStyles = "inline-flex items-center justify-center rounded-full font-bold transition-all duration-300 transform active:scale-95 disabled:opacity-50 disabled:pointer-events-none focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-[#121212]";
@@ -30,6 +32,13 @@ export function Button({
     lg: "py-4 px-10 text-lg",
   };
 
+  const handleClick = (e: React.MouseEvent<HTMLButtonElement>) => {
+    playSfx.click();
+    if (onClick) {
+      onClick(e);
+    }
+  };
+
   return (
     <button 
       className={twMerge(
@@ -39,6 +48,7 @@ export function Button({
         fullWidth && "w-full",
         className
       )}
+      onClick={handleClick}
       {...props}
     >
       {children}

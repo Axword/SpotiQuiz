@@ -1,9 +1,11 @@
-import { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useGameStore } from '../store/gameStore';
 import { Layout } from '../components/Layout';
 import { Button } from '../components/ui/Button';
-import { Clock, SkipForward, Play, Pause, Check, X, Search } from 'lucide-react';
+import { Clock, SkipForward, Play, Pause, Check, X, Search, LogOut, Volume2 } from 'lucide-react';
+import { translations } from '../lib/translations';
+import { playSfx } from '../lib/sfx';
 
 const Game = () => {
   const navigate = useNavigate();
@@ -16,8 +18,12 @@ const Game = () => {
     nextRound, 
     isGameActive, 
     gameMode,
-    roomType 
+    roomType,
+    language,
+    leaveRoom
   } = useGameStore();
+
+  const t = translations[language];
 
   const [timeLeft, setTimeLeft] = useState(30);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -26,78 +32,43 @@ const Game = () => {
   const [isRoundOver, setIsRoundOver] = useState(false);
   const [correctAnswer, setCorrectAnswer] = useState<string | null>(null);
   const [typedAnswer, setTypedAnswer] = useState('');
-  const [volume] = useState(0.5); // Fixed volume for now
-  
-  // List Mode State
   const [filteredTracks, setFilteredTracks] = useState<any[]>([]);
+  const [showUnmuteOverlay, setShowUnmuteOverlay] = useState(false);
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Initialize Audio
+  // Initialize Audio Logic
   useEffect(() => {
-    audioRef.current = new Audio();
-    audioRef.current.volume = volume;
-    
+    // Clean up previous audio instance
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current = null;
+    }
+
+    // Create new instance
+    const audio = new Audio();
+    audio.volume = 0.5;
+    audioRef.current = audio;
+
     return () => {
       if (audioRef.current) {
         audioRef.current.pause();
         audioRef.current.src = "";
       }
-      if (timerRef.current) clearInterval(timerRef.current);
+      stopTimer();
     };
   }, []);
 
-  // Round Setup
-  useEffect(() => {
-    if (!isGameActive || currentRound > roundsCount) {
-      navigate('/results');
-      return;
+  const stopTimer = () => {
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
     }
+  };
 
-    const track = tracks[currentRound - 1];
-    if (!track) return; // Should not happen
-
-    // Setup Audio
-    if (audioRef.current) {
-      audioRef.current.src = track.preview_url || '';
-      audioRef.current.load();
-      // Try to play immediately, but browser might block
-      audioRef.current.play()
-        .then(() => setIsPlaying(true))
-        .catch(e => {
-          console.warn("Autoplay blocked", e);
-          setIsPlaying(false);
-        });
-    }
-
-    // Reset State
-    setTimeLeft(30);
-    setSelectedChoice(null);
-    setIsRoundOver(false);
-    setTypedAnswer('');
-    setCorrectAnswer(null);
-
-    // Generate Choices for ABCD
-    if (gameMode === 'ABCD') {
-      const wrongChoices = tracks
-        .filter(t => t.id !== track.id)
-        .sort(() => 0.5 - Math.random())
-        .slice(0, 3);
-      
-      const roundChoices = [...wrongChoices, track]
-        .sort(() => 0.5 - Math.random());
-        
-      setChoices(roundChoices);
-    }
-    
-    // Reset list filter
-    if (gameMode === 'List') {
-        setFilteredTracks(tracks.sort((a, b) => a.name.localeCompare(b.name)));
-    }
-
-    // Start Timer
-    if (timerRef.current) clearInterval(timerRef.current);
+  const startTimer = () => {
+    stopTimer();
     timerRef.current = setInterval(() => {
       setTimeLeft(prev => {
         if (prev <= 1) {
@@ -107,36 +78,85 @@ const Game = () => {
         return prev - 1;
       });
     }, 1000);
+  };
 
-    return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
-    };
-  }, [currentRound, tracks, isGameActive]); // Depend only on round change
+  const playAudio = async (url: string) => {
+    if (!audioRef.current) return;
+    
+    try {
+      audioRef.current.src = url;
+      audioRef.current.load();
+      await audioRef.current.play();
+      setIsPlaying(true);
+      setShowUnmuteOverlay(false);
+    } catch (error) {
+      console.warn("Autoplay prevented:", error);
+      setIsPlaying(false);
+      setShowUnmuteOverlay(true);
+    }
+  };
+
+  // Round Logic
+  useEffect(() => {
+    if (!isGameActive || currentRound > roundsCount) {
+      setTimeout(() => navigate('/results'), 100);
+      return;
+    }
+
+    const track = tracks[currentRound - 1];
+    if (!track) return;
+
+    // Reset round state
+    setTimeLeft(30);
+    setSelectedChoice(null);
+    setIsRoundOver(false);
+    setTypedAnswer('');
+    setCorrectAnswer(null);
+    setIsPlaying(false);
+
+    // Prepare Choices
+    if (gameMode === 'ABCD') {
+      const wrongChoices = tracks
+        .filter(t => t.id !== track.id)
+        .sort(() => 0.5 - Math.random())
+        .slice(0, 3);
+      setChoices([...wrongChoices, track].sort(() => 0.5 - Math.random()));
+    } else if (gameMode === 'List') {
+        setFilteredTracks(tracks.sort((a, b) => a.name.localeCompare(b.name)));
+    }
+
+    // Play Audio
+    if (track.preview_url) {
+      playAudio(track.preview_url);
+    }
+
+    startTimer();
+
+    return () => stopTimer();
+  }, [currentRound, tracks, isGameActive]);
 
   const handleTimeUp = () => {
-    if (timerRef.current) clearInterval(timerRef.current);
-    
-    // Auto-select wrong if nothing selected?
-    // Actually just end round.
+    stopTimer();
     const track = tracks[currentRound - 1];
     setCorrectAnswer(track.id);
     setIsRoundOver(true);
     if (audioRef.current) audioRef.current.pause();
     setIsPlaying(false);
+    playSfx.error();
   };
 
   const handleAnswer = (answerId: string) => {
     if (isRoundOver) return;
     
     setSelectedChoice(answerId);
-    
     const track = tracks[currentRound - 1];
     const isCorrect = answerId === track.id;
     
     if (isCorrect) {
-      // Calculate score based on time left
-      const points = 100 + (timeLeft * 10);
-      addScore(points);
+      addScore(100 + (timeLeft * 10));
+      playSfx.success();
+    } else {
+      playSfx.error();
     }
     
     setCorrectAnswer(track.id);
@@ -148,25 +168,25 @@ const Game = () => {
     if (isRoundOver) return;
 
     const track = tracks[currentRound - 1];
-    // Simple fuzzy match
     const cleanAnswer = typedAnswer.toLowerCase().trim();
     const cleanCorrect = track.name.toLowerCase().trim();
     
-    // Check if answer contains significant part of title
     const isCorrect = cleanCorrect.includes(cleanAnswer) && cleanAnswer.length > 3;
 
     if (isCorrect) {
         addScore(100 + (timeLeft * 10));
-        setSelectedChoice('correct-typed'); // visual flag
+        setSelectedChoice('correct-typed');
+        playSfx.success();
     } else {
         setSelectedChoice('wrong-typed');
+        playSfx.error();
     }
 
     setCorrectAnswer(track.id);
     endRound();
   };
   
-  // Search handler for List mode
+  // Search Filter for List Mode
   useEffect(() => {
     if (gameMode === 'List') {
         if (!typedAnswer) {
@@ -182,20 +202,26 @@ const Game = () => {
   }, [typedAnswer, tracks, gameMode]);
 
   const endRound = () => {
-    if (timerRef.current) clearInterval(timerRef.current);
+    stopTimer();
     setIsRoundOver(true);
     if (audioRef.current) audioRef.current.pause();
     setIsPlaying(false);
   };
 
-  const togglePlay = () => {
+  const togglePlay = async () => {
     if (!audioRef.current) return;
     if (isPlaying) {
       audioRef.current.pause();
+      setIsPlaying(false);
     } else {
-      audioRef.current.play();
+      try {
+        await audioRef.current.play();
+        setIsPlaying(true);
+        setShowUnmuteOverlay(false);
+      } catch (e) {
+        console.error(e);
+      }
     }
-    setIsPlaying(!isPlaying);
   };
 
   const handleNextRound = () => {
@@ -206,17 +232,53 @@ const Game = () => {
     }
   };
 
-  // Host Mode View
+  const handleExit = () => {
+    if (audioRef.current) audioRef.current.pause();
+    leaveRoom();
+    navigate('/');
+  };
+
+  const handleForceStart = () => {
+    if (audioRef.current) {
+        audioRef.current.play().then(() => {
+            setIsPlaying(true);
+            setShowUnmuteOverlay(false);
+        }).catch(e => console.error(e));
+    }
+  };
+
+  // --------------------------------------------------------------------------
+  // RENDER
+  // --------------------------------------------------------------------------
+
+  // Host Mode
   if (roomType === 'LocalHost') {
     return (
         <Layout>
+            <div className="absolute top-20 left-4 z-40">
+                <Button variant="ghost" onClick={handleExit} className="text-gray-400 hover:text-white bg-black/50 backdrop-blur-md">
+                    <LogOut className="w-5 h-5 mr-2" />
+                    {t.backToHome}
+                </Button>
+            </div>
+
+            {showUnmuteOverlay && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm">
+                    <div className="text-center">
+                        <p className="text-white mb-4 text-xl">Kliknij, aby włączyć dźwięk</p>
+                        <Button onClick={handleForceStart} size="lg" className="animate-bounce">
+                            <Volume2 className="w-8 h-8 mr-2" /> Włącz Muzykę
+                        </Button>
+                    </div>
+                </div>
+            )}
+
             <div className="max-w-2xl mx-auto text-center space-y-8 pt-10">
                 <div className="text-sm uppercase tracking-widest text-gray-500 font-bold">
-                    Runda {currentRound} / {roundsCount}
+                    {t.rounds} {currentRound} / {roundsCount}
                 </div>
                 
                 <div className="py-12 relative">
-                    {/* Vinyl Animation */}
                     <div className={`w-64 h-64 rounded-full bg-black border-4 border-[#282828] mx-auto flex items-center justify-center shadow-2xl relative ${isPlaying ? 'animate-spin-slow' : ''}`}>
                          <div className="absolute inset-0 rounded-full bg-[repeating-radial-gradient(#222_0,#111_2px,#222_4px)] opacity-50" />
                          <img 
@@ -248,7 +310,7 @@ const Game = () => {
                     
                     {isRoundOver && (
                          <Button onClick={handleNextRound} className="animate-bounce">
-                             Następna Runda <SkipForward className="ml-2 w-4 h-4" />
+                             {t.nextRound} <SkipForward className="ml-2 w-4 h-4" />
                          </Button>
                     )}
                 </div>
@@ -266,14 +328,32 @@ const Game = () => {
     );
   }
 
-  // Solo Play View
+  // Solo Mode
   return (
     <Layout>
-      <div className="max-w-2xl mx-auto w-full pb-8">
-        {/* Header */}
-        <div className="flex items-center justify-between mb-8">
+      <div className="absolute top-24 left-4 z-40">
+         <Button variant="ghost" onClick={handleExit} className="text-gray-400 hover:text-white bg-black/50 backdrop-blur-md">
+             <LogOut className="w-5 h-5 mr-2" />
+             {t.backToHome}
+         </Button>
+      </div>
+
+      {showUnmuteOverlay && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm">
+              <div className="text-center">
+                  <p className="text-white mb-4 text-xl">Kliknij, aby włączyć dźwięk</p>
+                  <Button onClick={handleForceStart} size="lg" className="animate-bounce">
+                      <Volume2 className="w-8 h-8 mr-2" /> Włącz Muzykę
+                  </Button>
+              </div>
+          </div>
+      )}
+
+      <div className="max-w-2xl mx-auto w-full pb-8 pt-8">
+        {/* Game Stats Header */}
+        <div className="flex items-center justify-between mb-8 px-4">
             <div>
-                <span className="text-xs font-bold text-gray-500 uppercase tracking-widest">Runda</span>
+                <span className="text-xs font-bold text-gray-500 uppercase tracking-widest">{t.rounds}</span>
                 <div className="text-2xl font-bold">{currentRound} <span className="text-gray-600 text-lg">/ {roundsCount}</span></div>
             </div>
             
@@ -285,13 +365,13 @@ const Game = () => {
             </div>
 
             <div className="text-right">
-                <span className="text-xs font-bold text-gray-500 uppercase tracking-widest">Wynik</span>
+                <span className="text-xs font-bold text-gray-500 uppercase tracking-widest">{t.score}</span>
                 <div className="text-2xl font-bold text-green-400">{score}</div>
             </div>
         </div>
 
         {/* Visualizer / Cover */}
-        <div className="mb-10 relative group">
+        <div className="mb-10 relative group mx-4">
             <div className="aspect-video bg-[#181818] rounded-2xl border border-white/5 flex items-center justify-center overflow-hidden relative shadow-2xl">
                  {isRoundOver ? (
                      <div className="absolute inset-0 animate-fade-in flex flex-col items-center justify-center bg-black/80 backdrop-blur-md z-10">
@@ -318,121 +398,123 @@ const Game = () => {
         </div>
 
         {/* Game Area */}
-        {gameMode === 'ABCD' ? (
-             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                 {choices.map((choice) => {
-                     const isSelected = selectedChoice === choice.id;
-                     const isCorrect = correctAnswer === choice.id;
-                     const showResult = isRoundOver;
-                     
-                     let btnClass = "h-20 text-left px-6 text-sm md:text-base transition-all";
-                     if (showResult && isCorrect) btnClass += " bg-green-500 text-black border-green-500";
-                     else if (showResult && isSelected && !isCorrect) btnClass += " bg-red-500 text-white border-red-500";
-                     else if (isSelected) btnClass += " bg-white text-black scale-[1.02]";
-                     else btnClass += " bg-[#282828] text-gray-300 hover:bg-[#333]";
+        <div className="px-4">
+            {gameMode === 'ABCD' ? (
+                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                     {choices.map((choice) => {
+                         const isSelected = selectedChoice === choice.id;
+                         const isCorrect = correctAnswer === choice.id;
+                         const showResult = isRoundOver;
+                         
+                         let btnClass = "h-20 text-left px-6 text-sm md:text-base transition-all";
+                         if (showResult && isCorrect) btnClass += " bg-green-500 text-black border-green-500";
+                         else if (showResult && isSelected && !isCorrect) btnClass += " bg-red-500 text-white border-red-500";
+                         else if (isSelected) btnClass += " bg-white text-black scale-[1.02]";
+                         else btnClass += " bg-[#282828] text-gray-300 hover:bg-[#333]";
 
-                     return (
-                         <button
-                             key={choice.id}
-                             onClick={() => handleAnswer(choice.id)}
-                             disabled={isRoundOver}
-                             className={`rounded-xl font-bold relative overflow-hidden group ${btnClass}`}
-                         >
-                             <div className="relative z-10 flex items-center justify-between">
-                                 <div className="flex flex-col">
-                                     <span className="line-clamp-1">{choice.name}</span>
-                                     <span className="text-xs opacity-60 font-normal">{choice.artist}</span>
+                         return (
+                             <button
+                                 key={choice.id}
+                                 onClick={() => handleAnswer(choice.id)}
+                                 disabled={isRoundOver}
+                                 className={`rounded-xl font-bold relative overflow-hidden group ${btnClass}`}
+                             >
+                                 <div className="relative z-10 flex items-center justify-between">
+                                     <div className="flex flex-col">
+                                         <span className="line-clamp-1">{choice.name}</span>
+                                         <span className="text-xs opacity-60 font-normal">{choice.artist}</span>
+                                     </div>
+                                     {showResult && isCorrect && <Check className="w-5 h-5" />}
+                                     {showResult && isSelected && !isCorrect && <X className="w-5 h-5" />}
                                  </div>
-                                 {showResult && isCorrect && <Check className="w-5 h-5" />}
-                                 {showResult && isSelected && !isCorrect && <X className="w-5 h-5" />}
-                             </div>
-                         </button>
-                     );
-                 })}
-             </div>
-        ) : gameMode === 'Type' ? (
-            // Type Mode
-            <div className="max-w-md mx-auto">
-                 <form onSubmit={handleTypeAnswer} className="relative">
-                     <input
-                         type="text"
-                         value={typedAnswer}
-                         onChange={(e) => setTypedAnswer(e.target.value)}
-                         disabled={isRoundOver}
-                         placeholder="Wpisz tytuł utworu..."
-                         className="w-full bg-[#282828] border-2 border-white/10 rounded-xl py-4 px-6 text-lg focus:outline-none focus:border-green-500 focus:bg-[#333] transition-all"
-                         autoFocus
-                     />
-                     <Button 
-                        type="submit" 
-                        className="absolute right-2 top-2 bottom-2" 
-                        disabled={isRoundOver || !typedAnswer}
-                     >
-                        Zgadnij
-                     </Button>
-                 </form>
-                 
-                 {isRoundOver && (
-                     <div className="mt-6 text-center animate-fade-in">
-                         <div className="text-gray-400 mb-1">Poprawna odpowiedź:</div>
-                         <div className="text-xl font-bold text-green-400">{tracks[currentRound-1].name}</div>
-                     </div>
-                 )}
-            </div>
-        ) : (
-            // List Mode
-            <div className="max-w-md mx-auto relative">
-                <div className="relative mb-4">
-                     <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 w-5 h-5" />
-                     <input
-                         type="text"
-                         value={typedAnswer}
-                         onChange={(e) => setTypedAnswer(e.target.value)}
-                         disabled={isRoundOver}
-                         placeholder="Szukaj utworu na liście..."
-                         className="w-full bg-[#282828] border-2 border-white/10 rounded-xl py-4 pl-12 pr-6 text-lg focus:outline-none focus:border-green-500 focus:bg-[#333] transition-all"
-                         autoFocus
-                     />
+                             </button>
+                         );
+                     })}
+                 </div>
+            ) : gameMode === 'Type' ? (
+                // Type Mode
+                <div className="max-w-md mx-auto">
+                     <form onSubmit={handleTypeAnswer} className="relative">
+                         <input
+                             type="text"
+                             value={typedAnswer}
+                             onChange={(e) => setTypedAnswer(e.target.value)}
+                             disabled={isRoundOver}
+                             placeholder="Wpisz tytuł utworu..."
+                             className="w-full bg-[#282828] border-2 border-white/10 rounded-xl py-4 px-6 text-lg focus:outline-none focus:border-green-500 focus:bg-[#333] transition-all"
+                             autoFocus
+                         />
+                         <Button 
+                            type="submit" 
+                            className="absolute right-2 top-2 bottom-2" 
+                            disabled={isRoundOver || !typedAnswer}
+                         >
+                            Zgadnij
+                         </Button>
+                     </form>
+                     
+                     {isRoundOver && (
+                         <div className="mt-6 text-center animate-fade-in">
+                             <div className="text-gray-400 mb-1">{t.answerWas}</div>
+                             <div className="text-xl font-bold text-green-400">{tracks[currentRound-1].name}</div>
+                         </div>
+                     )}
                 </div>
-                
-                <div className="max-h-64 overflow-y-auto custom-scrollbar bg-[#181818] rounded-xl border border-white/5">
-                    {filteredTracks.map(track => {
-                        const isSelected = selectedChoice === track.id;
-                        const isCorrect = correctAnswer === track.id;
-                        
-                        let bgClass = "hover:bg-[#282828]";
-                        if (isRoundOver) {
-                            if (isCorrect) bgClass = "bg-green-500/20 text-green-400";
-                            else if (isSelected) bgClass = "bg-red-500/20 text-red-400";
-                        }
-                        
-                        return (
-                            <button
-                                key={track.id}
-                                onClick={() => handleAnswer(track.id)}
-                                disabled={isRoundOver}
-                                className={`w-full text-left p-4 border-b border-white/5 last:border-0 flex items-center justify-between transition-colors ${bgClass}`}
-                            >
-                                <div>
-                                    <div className="font-bold">{track.name}</div>
-                                    <div className="text-xs text-gray-500">{track.artist}</div>
-                                </div>
-                                {isRoundOver && isCorrect && <Check className="w-4 h-4 text-green-500" />}
-                            </button>
-                        );
-                    })}
+            ) : (
+                // List Mode
+                <div className="max-w-md mx-auto relative">
+                    <div className="relative mb-4">
+                         <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 w-5 h-5" />
+                         <input
+                             type="text"
+                             value={typedAnswer}
+                             onChange={(e) => setTypedAnswer(e.target.value)}
+                             disabled={isRoundOver}
+                             placeholder={t.searchPlaylist}
+                             className="w-full bg-[#282828] border-2 border-white/10 rounded-xl py-4 pl-12 pr-6 text-lg focus:outline-none focus:border-green-500 focus:bg-[#333] transition-all"
+                             autoFocus
+                         />
+                    </div>
+                    
+                    <div className="max-h-64 overflow-y-auto custom-scrollbar bg-[#181818] rounded-xl border border-white/5">
+                        {filteredTracks.map(track => {
+                            const isSelected = selectedChoice === track.id;
+                            const isCorrect = correctAnswer === track.id;
+                            
+                            let bgClass = "hover:bg-[#282828]";
+                            if (isRoundOver) {
+                                if (isCorrect) bgClass = "bg-green-500/20 text-green-400";
+                                else if (isSelected) bgClass = "bg-red-500/20 text-red-400";
+                            }
+                            
+                            return (
+                                <button
+                                    key={track.id}
+                                    onClick={() => handleAnswer(track.id)}
+                                    disabled={isRoundOver}
+                                    className={`w-full text-left p-4 border-b border-white/5 last:border-0 flex items-center justify-between transition-colors ${bgClass}`}
+                                >
+                                    <div>
+                                        <div className="font-bold">{track.name}</div>
+                                        <div className="text-xs text-gray-500">{track.artist}</div>
+                                    </div>
+                                    {isRoundOver && isCorrect && <Check className="w-4 h-4 text-green-500" />}
+                                </button>
+                            );
+                        })}
+                    </div>
                 </div>
-            </div>
-        )}
+            )}
 
-        {/* Next Round Button */}
-        {isRoundOver && (
-            <div className="mt-8 flex justify-center animate-fade-in-up">
-                <Button size="lg" onClick={handleNextRound} className="px-12">
-                    {currentRound === roundsCount ? 'Zobacz Wyniki' : 'Następna Runda'}
-                </Button>
-            </div>
-        )}
+            {/* Next Round Button */}
+            {isRoundOver && (
+                <div className="mt-8 flex justify-center animate-fade-in-up">
+                    <Button size="lg" onClick={handleNextRound} className="px-12">
+                        {currentRound === roundsCount ? t.gameOver : t.nextRound}
+                    </Button>
+                </div>
+            )}
+        </div>
       </div>
     </Layout>
   );

@@ -3,13 +3,14 @@ import Home from './pages/Home';
 import Setup from './pages/Setup';
 import Game from './pages/Game';
 import Results from './pages/Results';
+import Lobby from './pages/Lobby';
 import { useGameStore } from './store/gameStore';
 
-function GameRoute({ children }: { children: React.ReactNode }) {
-  const { isGameActive } = useGameStore();
-  // If game is not active, redirect to setup or home.
-  // But allow if we are just navigating.
-  if (!isGameActive) return <Navigate to="/setup" />;
+function ProtectedRoute({ children, status }: { children: React.ReactNode, status: string | string[] }) {
+  const { gameStatus } = useGameStore();
+  const allowed = Array.isArray(status) ? status.includes(gameStatus) : gameStatus === status;
+  
+  if (!allowed) return <Navigate to="/" />;
   return <>{children}</>;
 }
 
@@ -18,17 +19,27 @@ export default function App() {
     <BrowserRouter>
       <Routes>
         <Route path="/" element={<Home />} />
-        <Route path="/home" element={<Home />} /> {/* Handle Redirect URI ending in /home */}
+        <Route path="/home" element={<Home />} /> 
         
         <Route path="/setup" element={<Setup />} />
         
+        <Route path="/lobby" element={
+          <ProtectedRoute status="lobby">
+            <Lobby />
+          </ProtectedRoute>
+        } />
+
         <Route path="/game" element={
-          <GameRoute>
+          <ProtectedRoute status={['playing', 'lobby']}> {/* Allow lobby to transition to game */}
             <Game />
-          </GameRoute>
+          </ProtectedRoute>
         } />
         
-        <Route path="/results" element={<Results />} />
+        <Route path="/results" element={
+          <ProtectedRoute status="results">
+             <Results />
+          </ProtectedRoute>
+        } />
         
         <Route path="*" element={<Navigate to="/" />} />
       </Routes>

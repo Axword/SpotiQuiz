@@ -6,10 +6,12 @@ import { useGameStore } from '../store/gameStore';
 import { Button } from '../components/ui/Button';
 import { Layout } from '../components/Layout';
 import { Card } from '../components/ui/Card';
+import { translations } from '../lib/translations';
 
 const Results = () => {
   const navigate = useNavigate();
-  const { score, roundsCount, resetGame } = useGameStore();
+  const { score, roundsCount, resetGame, language } = useGameStore();
+  const t = translations[language];
 
   useEffect(() => {
     // Fire confetti
@@ -61,18 +63,18 @@ const Results = () => {
         </div>
 
         <div className="space-y-2">
-          <h1 className="text-4xl font-black text-white">Koniec Gry!</h1>
-          <p className="text-gray-400">Zobacz jak ci poszło</p>
+          <h1 className="text-4xl font-black text-white">{t.gameOver}</h1>
+          <p className="text-gray-400">{t.score}</p>
         </div>
 
         <Card className="p-8 border border-white/10 bg-white/5 backdrop-blur-sm">
           <div className="grid grid-cols-2 gap-8 mb-8">
              <div>
-               <div className="text-sm uppercase tracking-widest text-gray-500 font-bold mb-1">Wynik</div>
+               <div className="text-sm uppercase tracking-widest text-gray-500 font-bold mb-1">{t.score}</div>
                <div className="text-4xl font-black text-green-400">{score}</div>
              </div>
              <div>
-               <div className="text-sm uppercase tracking-widest text-gray-500 font-bold mb-1">Rundy</div>
+               <div className="text-sm uppercase tracking-widest text-gray-500 font-bold mb-1">{t.rounds}</div>
                <div className="text-4xl font-black text-white">{roundsCount}</div>
              </div>
           </div>
@@ -94,12 +96,12 @@ const Results = () => {
         <div className="flex flex-col gap-4">
           <Button size="lg" onClick={handlePlayAgain} fullWidth className="group">
             <RefreshCw className="w-5 h-5 mr-2 group-hover:rotate-180 transition-transform" />
-            Zagraj Ponownie
+            {t.playAgain}
           </Button>
           
           <Button variant="ghost" onClick={handleGoHome} fullWidth>
             <Home className="w-5 h-5 mr-2" />
-            Wróć do Menu
+            {t.backToHome}
           </Button>
         </div>
 
