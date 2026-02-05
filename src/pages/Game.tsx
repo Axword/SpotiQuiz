@@ -4,6 +4,8 @@ import { useGameStore } from '../store/gameStore';
 import { playTrack, pausePlayback } from '../lib/spotify';
 import { playCorrectSound, playWrongSound, resumeAudioContext } from '../lib/sounds';
 import { Layout } from '../components/Layout';
+import { peerManager } from '../lib/peerManager';
+import type { PeerMessage } from '../lib/peerManager';
 
 export default function Game() {
   const navigate = useNavigate();
@@ -115,6 +117,52 @@ export default function Game() {
   }, [players, roomType, isHost]);
 
   useEffect(() => {
+    if (roomType === 'Solo') return;
+
+    const handlePeerMessage = (message: PeerMessage) => {
+      switch (message.type) {
+        case 'answer-submitted':
+          if (isHost) {
+            setPlayerAnswered(message.payload.playerId, true);
+            const state = useGameStore.getState();
+            peerManager.broadcast({ 
+              type: 'player-list', 
+              payload: state.players 
+            });
+          }
+          break;
+
+        case 'player-list':
+          if (!isHost) {
+            useGameStore.getState().setPlayers(message.payload);
+          }
+          break;
+
+        case 'show-answer':
+          if (!isHost) {
+            setShowAnswer(true);
+          }
+          break;
+
+        case 'next-round':
+          if (!isHost) {
+            nextRound();
+          }
+          break;
+
+        case 'all-answered':
+          break;
+      }
+    };
+
+    peerManager.onMessage(handlePeerMessage);
+
+    return () => {
+      peerManager.offMessage(handlePeerMessage);
+    };
+  }, [roomType, isHost]);
+
+  useEffect(() => {
     if (showAnswer) {
       setAutoAdvanceTimer(3);
       autoAdvanceRef.current = setInterval(() => {
@@ -143,6 +191,10 @@ export default function Game() {
     }
     await stopMusic();
     setShowAnswer(true);
+    
+    if (isHost && roomType !== 'Solo') {
+      peerManager.broadcast({ type: 'show-answer' });
+    }
   };
 
   const checkAnswer = (userAnswer: string): boolean => {
@@ -195,6 +247,12 @@ export default function Game() {
       setShowAnswer(true);
     } else {
       setPlayerAnswered(playerId, true);
+      if (!isHost) {
+        peerManager.send({
+          type: 'answer-submitted',
+          payload: { playerId, correct, timeMs }
+        });
+      }
     }
   };
 
@@ -206,6 +264,11 @@ export default function Game() {
 
   const handleNextRound = () => {
     if (autoAdvanceRef.current) clearInterval(autoAdvanceRef.current);
+    
+    if (isHost && roomType !== 'Solo') {
+      peerManager.broadcast({ type: 'next-round' });
+    }
+    
     if (currentRound >= roundsCount || currentRound >= gameTracks.length) {
       navigate('/results');
     } else {

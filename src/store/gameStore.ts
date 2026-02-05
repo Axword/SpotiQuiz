@@ -56,7 +56,7 @@ interface GameState {
   
   setGameSettings: (settings: Partial<{ gameMode: GameMode; roundsCount: number; roundTime: number }>) => void;
   setTracks: (tracks: SpotifyTrack[]) => void;
-  setGameState: (gameState: { tracks: SpotifyTrack[]; allTracks: SpotifyTrack[]; gameTracks: SpotifyTrack[]; gameMode: GameMode; roundsCount: number; roundTime: number; roomType: RoomType }) => void;
+  setGameState: (gameState: { tracks: SpotifyTrack[]; allTracks: SpotifyTrack[]; gameTracks: SpotifyTrack[]; gameMode: GameMode; roundsCount: number; roundTime: number; roomType: RoomType; players?: Player[] }) => void;
   
   startGame: () => void;
   nextRound: () => void;
@@ -168,7 +168,7 @@ export const useGameStore = create<GameState>()(
         });
       },
       
-      setGameState: (gameState: { tracks: SpotifyTrack[]; allTracks: SpotifyTrack[]; gameTracks: SpotifyTrack[]; gameMode: GameMode; roundsCount: number; roundTime: number; roomType: RoomType }) => {
+      setGameState: (gameState: { tracks: SpotifyTrack[]; allTracks: SpotifyTrack[]; gameTracks: SpotifyTrack[]; gameMode: GameMode; roundsCount: number; roundTime: number; roomType: RoomType; players?: Player[] }) => {
         set({
           tracks: gameState.tracks,
           allTracks: gameState.allTracks,
@@ -176,7 +176,8 @@ export const useGameStore = create<GameState>()(
           gameMode: gameState.gameMode,
           roundsCount: gameState.roundsCount,
           roundTime: gameState.roundTime,
-          roomType: gameState.roomType
+          roomType: gameState.roomType,
+          ...(gameState.players && { players: gameState.players })
         });
       },
       

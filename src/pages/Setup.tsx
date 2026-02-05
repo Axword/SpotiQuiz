@@ -22,8 +22,9 @@ export default function Setup() {
     startGame
   } = useGameStore();
 
-  const [activeTab, setActiveTab] = useState<'my' | 'search'>('my');
+  const [activeTab, setActiveTab] = useState<'my' | 'search' | 'url'>('my');
   const [query, setQuery] = useState('');
+  const [urlInput, setUrlInput] = useState('');
   const [playlists, setPlaylists] = useState<SpotifyPlaylist[]>([]);
   const [selectedPlaylist, setSelectedPlaylist] = useState<SpotifyPlaylist | null>(null);
   const [loading, setLoading] = useState(false);
@@ -69,8 +70,35 @@ export default function Setup() {
     }
   };
 
+  const extractPlaylistId = (url: string): string | null => {
+    const patterns = [
+      /spotify\.com\/playlist\/([a-zA-Z0-9]+)/,
+      /spotify:playlist:([a-zA-Z0-9]+)/,
+      /^([a-zA-Z0-9]{22})$/
+    ];
+    
+    for (const pattern of patterns) {
+      const match = url.match(pattern);
+      if (match) return match[1];
+    }
+    return null;
+  };
+
   const handleStartGame = async () => {
-    if (!selectedPlaylist || !token) return;
+    let playlistId: string | null = null;
+    
+    if (activeTab === 'url') {
+      playlistId = extractPlaylistId(urlInput.trim());
+      if (!playlistId) {
+        setError('Nieprawidłowy link do playlisty');
+        return;
+      }
+    } else {
+      if (!selectedPlaylist) return;
+      playlistId = selectedPlaylist.id;
+    }
+    
+    if (!token) return;
     if (roomType !== 'Solo' && !hostName.trim()) {
       setError('Podaj swoją nazwę');
       return;
@@ -80,7 +108,7 @@ export default function Setup() {
     setError(null);
 
     try {
-      const tracks = await fetchPlaylistTracks(token, selectedPlaylist.id);
+      const tracks = await fetchPlaylistTracks(token, playlistId);
       
       if (tracks.length < roundsCount) {
         setGameSettings({ roundsCount: tracks.length });
@@ -277,9 +305,9 @@ export default function Setup() {
 
               <button
                 onClick={handleStartGame}
-                disabled={!selectedPlaylist || loading}
+                disabled={(!selectedPlaylist && activeTab !== 'url') || (activeTab === 'url' && !urlInput) || loading}
                 className={`w-full py-4 rounded-xl font-bold text-lg transition-all flex items-center justify-center gap-2 ${
-                  selectedPlaylist && !loading
+                  ((selectedPlaylist && activeTab !== 'url') || (activeTab === 'url' && urlInput)) && !loading
                     ? 'bg-green-500 hover:bg-green-400 text-black'
                     : 'bg-gray-700 text-gray-500 cursor-not-allowed'
                 }`}
@@ -303,7 +331,7 @@ export default function Setup() {
             <div className="lg:col-span-2 bg-[#1f1f3a] rounded-2xl p-6 flex flex-col">
               <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 mb-6">
                 <h2 className="text-xl font-bold text-white">Wybierz playlistę</h2>
-                <div className="flex gap-2">
+                <div className="flex gap-2 flex-wrap">
                   <button
                     onClick={() => setActiveTab('my')}
                     className={`px-4 py-2 rounded-full text-sm font-bold transition-colors ${
@@ -319,6 +347,17 @@ export default function Setup() {
                     }`}
                   >
                     Szukaj
+                  </button>
+                  <button
+                    onClick={() => setActiveTab('url')}
+                    className={`px-4 py-2 rounded-full text-sm font-bold transition-colors flex items-center gap-2 ${
+                      activeTab === 'url' ? 'bg-white text-black' : 'bg-[#2a2a4a] text-gray-400 hover:text-white'
+                    }`}
+                  >
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+                    </svg>
+                    Link
                   </button>
                 </div>
               </div>
@@ -340,8 +379,45 @@ export default function Setup() {
                 </form>
               )}
 
+              {activeTab === 'url' && (
+                <div className="mb-6">
+                  <div className="relative">
+                    <svg className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+                    </svg>
+                    <input
+                      type="text"
+                      value={urlInput}
+                      onChange={(e) => setUrlInput(e.target.value)}
+                      placeholder="Wklej link do playlisty Spotify..."
+                      className="w-full pl-12 pr-4 py-3 bg-[#2a2a4a] border border-white/10 rounded-xl text-white placeholder-gray-500 focus:outline-none focus:border-green-500"
+                    />
+                  </div>
+                  <p className="text-xs text-gray-500 mt-2">
+                    np. https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M
+                  </p>
+                </div>
+              )}
+
               <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar min-h-[400px]">
-                {loadingPlaylists ? (
+                {activeTab === 'url' ? (
+                  <div className="flex flex-col items-center justify-center py-16 text-center">
+                    <div className="w-20 h-20 bg-[#2a2a4a] rounded-full flex items-center justify-center mb-6">
+                      <svg className="w-10 h-10 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+                      </svg>
+                    </div>
+                    <h3 className="text-xl font-bold text-white mb-2">Wklej link do playlisty</h3>
+                    <p className="text-gray-400 max-w-md mb-4">
+                      Możesz wkleić link do dowolnej publicznej playlisty Spotify - np. od znajomego lub z internetu.
+                    </p>
+                    {urlInput && extractPlaylistId(urlInput) && (
+                      <div className="bg-green-500/10 border border-green-500/30 rounded-xl px-4 py-2 text-green-400 text-sm">
+                        ✓ Wykryto prawidłowy link do playlisty
+                      </div>
+                    )}
+                  </div>
+                ) : loadingPlaylists ? (
                   <div className="flex items-center justify-center py-20">
                     <div className="w-10 h-10 border-4 border-green-500 border-t-transparent rounded-full animate-spin"></div>
                   </div>
@@ -350,31 +426,31 @@ export default function Setup() {
                     {activeTab === 'search' ? 'Wpisz nazwę playlisty i wyszukaj' : 'Brak playlist'}
                   </div>
                 ) : (
-                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+                  <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 gap-3">
                     {playlists.map((playlist) => (
                       <button
                         key={playlist.id}
                         onClick={() => setSelectedPlaylist(playlist)}
-                        className={`group relative aspect-square rounded-xl overflow-hidden transition-all ${
+                        className={`group relative aspect-square rounded-lg overflow-hidden transition-all ${
                           selectedPlaylist?.id === playlist.id 
-                            ? 'ring-4 ring-green-500 scale-[0.98]' 
-                            : 'hover:scale-[1.02]'
+                            ? 'ring-3 ring-green-500 scale-[0.96]' 
+                            : 'hover:scale-[1.03]'
                         }`}
                       >
                         <img 
-                          src={playlist.image || 'https://via.placeholder.com/200'} 
+                          src={playlist.image || 'https://via.placeholder.com/120'} 
                           alt={playlist.name}
                           className="w-full h-full object-cover"
                         />
-                        <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent" />
-                        <div className="absolute bottom-0 left-0 right-0 p-3">
-                          <p className="font-bold text-white text-sm truncate">{playlist.name}</p>
-                          <p className="text-xs text-gray-400">{playlist.tracks.total} utworów</p>
+                        <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/30 to-transparent" />
+                        <div className="absolute bottom-0 left-0 right-0 p-2">
+                          <p className="font-bold text-white text-xs truncate">{playlist.name}</p>
+                          <p className="text-[10px] text-gray-400">{playlist.tracks.total} utworów</p>
                         </div>
                         {selectedPlaylist?.id === playlist.id && (
-                          <div className="absolute inset-0 flex items-center justify-center bg-black/40">
-                            <div className="w-12 h-12 bg-green-500 rounded-full flex items-center justify-center">
-                              <svg className="w-6 h-6 text-black" fill="currentColor" viewBox="0 0 24 24">
+                          <div className="absolute inset-0 flex items-center justify-center bg-black/50">
+                            <div className="w-8 h-8 bg-green-500 rounded-full flex items-center justify-center">
+                              <svg className="w-4 h-4 text-black" fill="currentColor" viewBox="0 0 24 24">
                                 <path d="M5 13l4 4L19 7" stroke="currentColor" strokeWidth={3} fill="none" />
                               </svg>
                             </div>
