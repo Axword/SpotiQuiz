@@ -1,13 +1,11 @@
 import axios from 'axios';
 
 const CLIENT_ID = '7826777c157c43c080e538950ce5346e';
-// Dynamic redirect URI handling
+
 const getRedirectUri = () => {
-  // Always use local loopback for development to satisfy Spotify's strict security
   if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
     return 'http://127.0.0.1:8080/callback';
   }
-  // Production
   return `${window.location.origin}/callback`;
 };
 
@@ -22,7 +20,6 @@ const SCOPES = [
   'user-read-currently-playing'
 ];
 
-// PKCE Helpers
 const generateRandomString = (length: number) => {
   const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
   const values = crypto.getRandomValues(new Uint8Array(length));
@@ -42,11 +39,9 @@ const base64urlencode = (a: ArrayBuffer) => {
     .replace(/=+$/, '');
 };
 
-// Auth Functions
 export const redirectToAuthCodeFlow = async () => {
   const codeVerifier = generateRandomString(64);
   const codeChallenge = base64urlencode(await sha256(codeVerifier));
-
   window.localStorage.setItem('pkce_code_verifier', codeVerifier);
 
   const params = new URLSearchParams({
@@ -58,17 +53,12 @@ export const redirectToAuthCodeFlow = async () => {
     code_challenge: codeChallenge
   });
 
-  const url = `https://accounts.spotify.com/authorize?${params.toString()}`;
-  console.log('Redirecting to Spotify Auth:', url);
-  window.location.href = url;
+  window.location.href = `https://accounts.spotify.com/authorize?${params.toString()}`;
 };
 
 export const exchangeToken = async (code: string) => {
   const codeVerifier = window.localStorage.getItem('pkce_code_verifier');
-
-  if (!codeVerifier) {
-    throw new Error('No code verifier found');
-  }
+  if (!codeVerifier) throw new Error('No code verifier found');
 
   const params = new URLSearchParams({
     client_id: CLIENT_ID,
@@ -78,20 +68,20 @@ export const exchangeToken = async (code: string) => {
     code_verifier: codeVerifier,
   });
 
-  try {
-    const response = await axios.post('https://accounts.spotify.com/api/token', params, {
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-      },
-    });
-    return response.data;
-  } catch (error) {
-    console.error('Token exchange failed', error);
-    throw error;
-  }
+  const response = await axios.post('https://accounts.spotify.com/api/token', params, {
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+  });
+  return response.data;
 };
 
-// Data Types
+export interface SpotifyDevice {
+  id: string;
+  name: string;
+  type: string;
+  is_active: boolean;
+  volume_percent: number;
+}
+
 export interface SpotifyTrack {
   id: string;
   name: string;
@@ -105,113 +95,120 @@ export interface SpotifyPlaylist {
   id: string;
   name: string;
   image: string;
-  tracks: {
-    total: number;
-  };
+  tracks: { total: number };
 }
 
-// Real Data Fetching Functions
+export const getPlaybackState = async (token: string) => {
+  try {
+    const response = await axios.get('https://api.spotify.com/v1/me/player', {
+      headers: { Authorization: `Bearer ${token}` },
+      params: { market: 'PL' }
+    });
+    return response.data;
+  } catch {
+    return null;
+  }
+};
+
+export const getAvailableDevices = async (token: string): Promise<SpotifyDevice[]> => {
+  const response = await axios.get('https://api.spotify.com/v1/me/player/devices', {
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  return response.data.devices || [];
+};
+
+export const transferPlayback = async (token: string, deviceId: string) => {
+  await axios.put(
+    'https://api.spotify.com/v1/me/player',
+    { device_ids: [deviceId], play: false },
+    { headers: { Authorization: `Bearer ${token}` } }
+  );
+};
+
 export const getUserPlaylists = async (token: string): Promise<SpotifyPlaylist[]> => {
   if (!token) throw new Error('Token required');
-  const response = await axios.get(`https://api.spotify.com/v1/me/playlists`, {
+  const response = await axios.get('https://api.spotify.com/v1/me/playlists', {
     headers: { Authorization: `Bearer ${token}` },
-    params: { limit: 20 }
+    params: { limit: 50 }
   });
   return response.data.items.map((item: any) => ({
     id: item.id,
     name: item.name,
-    image: item.images?.[0]?.url,
-    tracks: item.tracks
-  }));
-};
-
-export const getFeaturedPlaylists = async (token?: string): Promise<SpotifyPlaylist[]> => {
-  const headers: any = {};
-  if (token) {
-    headers.Authorization = `Bearer ${token}`;
-  }
-  const response = await axios.get(`https://api.spotify.com/v1/browse/featured-playlists`, {
-    headers,
-    params: { limit: 20, country: 'PL', locale: 'pl_PL' }
-  });
-  return response.data.playlists.items.map((item: any) => ({
-    id: item.id,
-    name: item.name,
-    image: item.images?.[0]?.url,
+    image: item.images?.[0]?.url || '',
     tracks: item.tracks
   }));
 };
 
 export const searchPlaylists = async (token: string, query: string): Promise<SpotifyPlaylist[]> => {
   if (!token) throw new Error('Token required');
-  const response = await axios.get(`https://api.spotify.com/v1/search`, {
+  const response = await axios.get('https://api.spotify.com/v1/search', {
     headers: { Authorization: `Bearer ${token}` },
-    params: { q: query, type: 'playlist', limit: 10, market: 'PL' }
+    params: { q: query, type: 'playlist', limit: 20, market: 'PL' }
   });
   return response.data.playlists.items.map((item: any) => ({
     id: item.id,
     name: item.name,
-    image: item.images?.[0]?.url,
+    image: item.images?.[0]?.url || '',
     tracks: item.tracks
   }));
 };
 
-// The core function for fetching playlist tracks (no preview_url requirement)
 export const fetchPlaylistTracks = async (token: string, playlistId: string): Promise<SpotifyTrack[]> => {
   if (!token) throw new Error("No token provided");
 
   let tracks: SpotifyTrack[] = [];
-  let nextUrl = `https://api.spotify.com/v1/playlists/${playlistId}/tracks?limit=50&market=PL`;
+  let nextUrl: string | null = `https://api.spotify.com/v1/playlists/${playlistId}/tracks?limit=50&market=PL`;
   let pageCount = 0;
-  const MAX_PAGES = 10; // Fetch up to 500 tracks
-
-  console.log(`Starting fetch for playlist ${playlistId}`);
+  const MAX_PAGES = 10;
 
   while (nextUrl && pageCount < MAX_PAGES) {
-    console.log(`Fetching page ${pageCount + 1}...`);
-    try {
-      const response = await axios.get(nextUrl, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
+    const response: any = await axios.get(nextUrl, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
 
-      const items = response.data.items;
-      
-      for (const item of items) {
-        const track = item.track;
-        // Use any track that is not local
-        if (track && !track.is_local) {
-          tracks.push({
-            id: track.id,
-            name: track.name,
-            artist: track.artists.map((a: any) => a.name).join(', '),
-            preview_url: track.preview_url, // May be null
-            image: track.album.images?.[0]?.url,
-            uri: track.uri
-          });
-        }
+    for (const item of response.data.items) {
+      const track = item.track;
+      if (track && !track.is_local) {
+        tracks.push({
+          id: track.id,
+          name: track.name,
+          artist: track.artists.map((a: any) => a.name).join(', '),
+          preview_url: track.preview_url,
+          image: track.album.images?.[0]?.url,
+          uri: track.uri
+        });
       }
-
-      nextUrl = response.data.next;
-      pageCount++;
-    } catch (error) {
-      console.error("Error fetching page:", error);
-      break; 
     }
+
+    nextUrl = response.data.next;
+    pageCount++;
   }
 
-  console.log(`Fetched ${tracks.length} tracks.`);
-
   if (tracks.length < 4) {
-    throw new Error(`Znaleziono tylko ${tracks.length} utworów. To za mało na grę! (Wymagane min. 4)`);
+    throw new Error(`Znaleziono tylko ${tracks.length} utworów. Wymagane min. 4!`);
   }
 
   return tracks;
 };
 
-export const playTrack = async (token: string, deviceId: string, trackUri: string) => {
+export const playTrack = async (token: string, deviceId: string, trackUri: string, positionMs = 0) => {
   await axios.put(
     `https://api.spotify.com/v1/me/player/play?device_id=${deviceId}`,
-    { uris: [trackUri] },
+    { uris: [trackUri], position_ms: positionMs },
     { headers: { Authorization: `Bearer ${token}` } }
   );
+};
+
+export const pausePlayback = async (token: string, deviceId?: string) => {
+  const url = deviceId 
+    ? `https://api.spotify.com/v1/me/player/pause?device_id=${deviceId}`
+    : 'https://api.spotify.com/v1/me/player/pause';
+  await axios.put(url, {}, { headers: { Authorization: `Bearer ${token}` } });
+};
+
+export const getCurrentUser = async (token: string) => {
+  const response = await axios.get('https://api.spotify.com/v1/me', {
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  return response.data;
 };

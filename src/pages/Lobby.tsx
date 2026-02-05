@@ -1,155 +1,322 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Users, Copy, ArrowLeft, Play, Wifi, WifiOff } from 'lucide-react';
 import { useGameStore } from '../store/gameStore';
-import { Button } from '../components/ui/Button';
-import { Card } from '../components/ui/Card';
-import { translations } from '../lib/translations';
+import Peer, { DataConnection } from 'peerjs';
 
-const Lobby = () => {
+interface PeerMessage {
+  type: 'join' | 'player-list' | 'start-game' | 'game-state' | 'answer' | 'next-round' | 'show-answer';
+  payload?: any;
+}
+
+export default function Lobby() {
   const navigate = useNavigate();
-  const { 
-    roomCode, 
-    isHost, 
-    gameStatus, 
-    startGame, 
-    leaveRoom,
-    language,
+  const {
+    roomCode,
     players,
+    isHost,
+    userName,
+    tracks,
+    gameMode,
+    roundsCount,
+    roundTime,
+    roomType,
     setPlayers,
-    nickname,
-    setNickname,
-    initPeer,
-    localPeerId,
-    remotePeers
+    addPlayer,
+    startGame
   } = useGameStore();
 
-  const t = translations[language];
-
+  const [copied, setCopied] = useState(false);
+  const [connecting, setConnecting] = useState(!isHost);
+  const [error, setError] = useState<string | null>(null);
   
+  const peerRef = useRef<Peer | null>(null);
+  const connectionsRef = useRef<Map<string, DataConnection>>(new Map());
+
   useEffect(() => {
-    if (gameStatus !== 'lobby') {
+    if (!roomCode) {
       navigate('/');
+      return;
     }
-  }, [gameStatus, navigate]);
 
-  useEffect(() => {
-    if (!isHost && !nickname) {
-      const nick = prompt('Podaj swój nick:') || 'Gość';
-      setNickname(nick);
-      setPlayers((prev: string[]) => [...prev, nick]);
+    const peerId = isHost ? `spotify-quiz-${roomCode}` : `spotify-quiz-${roomCode}-${Date.now()}`;
+    
+    const peer = new Peer(peerId, {
+      config: {
+        iceServers: [
+          { urls: 'stun:stun.l.google.com:19302' },
+          { urls: 'stun:stun1.l.google.com:19302' }
+        ]
+      }
+    });
+
+    peerRef.current = peer;
+
+    peer.on('open', () => {
+      if (!isHost) {
+        const hostPeerId = `spotify-quiz-${roomCode}`;
+        const conn = peer.connect(hostPeerId, { reliable: true });
+        
+        conn.on('open', () => {
+          setConnecting(false);
+          conn.send({ type: 'join', payload: { name: userName, id: peerId } } as PeerMessage);
+        });
+
+        conn.on('data', (data) => {
+          const message = data as PeerMessage;
+          handleMessage(message, conn);
+        });
+
+        conn.on('error', () => {
+          setError('Nie udało się połączyć z hostem');
+          setConnecting(false);
+        });
+
+        connectionsRef.current.set('host', conn);
+      }
+    });
+
+    peer.on('connection', (conn) => {
+      conn.on('open', () => {
+        connectionsRef.current.set(conn.peer, conn);
+      });
+
+      conn.on('data', (data) => {
+        const message = data as PeerMessage;
+        handleMessage(message, conn);
+      });
+
+      conn.on('close', () => {
+        connectionsRef.current.delete(conn.peer);
+      });
+    });
+
+    peer.on('error', (err) => {
+      console.error('Peer error:', err);
+      if (!isHost) {
+        setError('Nie udało się połączyć. Sprawdź kod pokoju.');
+        setConnecting(false);
+      }
+    });
+
+    return () => {
+      peer.destroy();
+    };
+  }, [roomCode, isHost, userName]);
+
+  const handleMessage = (message: PeerMessage, _conn: DataConnection) => {
+    switch (message.type) {
+      case 'join':
+        if (isHost) {
+          const newPlayer = {
+            id: message.payload.id,
+            name: message.payload.name,
+            score: 0,
+            isHost: false
+          };
+          addPlayer(newPlayer);
+          
+          setTimeout(() => {
+            broadcastToAll({ type: 'player-list', payload: useGameStore.getState().players });
+          }, 100);
+        }
+        break;
+
+      case 'player-list':
+        if (!isHost) {
+          setPlayers(message.payload);
+        }
+        break;
+
+      case 'start-game':
+        if (!isHost) {
+          useGameStore.setState({
+            tracks: message.payload.tracks,
+            gameMode: message.payload.gameMode,
+            roundsCount: message.payload.roundsCount,
+            roundTime: message.payload.roundTime,
+            roomType: message.payload.roomType
+          });
+          startGame();
+          navigate('/game');
+        }
+        break;
     }
-  }, [isHost, nickname, setNickname, setPlayers]);
+  };
 
+  const broadcastToAll = (message: PeerMessage) => {
+    connectionsRef.current.forEach((conn) => {
+      if (conn.open) {
+        conn.send(message);
+      }
+    });
+  };
 
-
-  useEffect(() => {
-    if (gameStatus === 'lobby') {
-      initPeer();
+  const handleCopyCode = () => {
+    if (roomCode) {
+      navigator.clipboard.writeText(roomCode);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
     }
-  }, [gameStatus, initPeer]);
+  };
 
-  const handleStart = () => {
-    if (isHost) {
-      startGame();
-      navigate('/game');
-    }
+  const handleStartGame = () => {
+    if (!isHost || players.length < 1) return;
+
+    broadcastToAll({
+      type: 'start-game',
+      payload: { tracks, gameMode, roundsCount, roundTime, roomType }
+    });
+
+    startGame();
+    navigate('/game');
   };
 
   const handleLeave = () => {
-    leaveRoom();
-    navigate('/');
+    if (peerRef.current) {
+      peerRef.current.destroy();
+    }
+    navigate('/mode');
   };
 
-  const copyCode = () => {
-    if (roomCode) navigator.clipboard.writeText(roomCode);
-  };
+  if (connecting) {
+    return (
+      <div className="min-h-screen bg-gradient-to-b from-[#1a1a2e] via-[#16213e] to-[#0f0f23] flex items-center justify-center">
+        <div className="text-center">
+          <div className="w-16 h-16 mx-auto mb-4 border-4 border-purple-500 border-t-transparent rounded-full animate-spin"></div>
+          <p className="text-gray-400">Łączenie z hostem...</p>
+          {error && (
+            <div className="mt-4">
+              <p className="text-red-400 mb-4">{error}</p>
+              <button
+                onClick={() => navigate('/join')}
+                className="px-6 py-2 bg-white/10 hover:bg-white/20 text-white rounded-full"
+              >
+                Spróbuj ponownie
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className="flex flex-col items-center justify-center min-h-[60vh] space-y-8 animate-fade-in">
-      <div className="flex items-center gap-4 w-full max-w-2xl">
-        <Button variant="ghost" onClick={handleLeave} className="gap-2">
-          <ArrowLeft className="w-4 h-4" />
-          {t.back}
-        </Button>
-      </div>
-
-      <div className="text-center space-y-2">
-        <h2 className="text-4xl font-bold text-white">{isHost ? t.hostMode : t.waitingForHost}</h2>
-        <p className="text-gray-400">{t.roomCode}</p>
-        
-        <div className="flex items-center justify-center gap-4 bg-white/10 p-4 rounded-xl">
-          <span className="text-5xl font-mono font-black tracking-widest text-[#1DB954]">{roomCode}</span>
-          <div className="flex flex-col gap-2">
-            <button 
-              onClick={copyCode}
-              className="bg-white/20 hover:bg-white/30 p-2 rounded transition-colors"
+    <div className="min-h-screen bg-gradient-to-b from-[#1a1a2e] via-[#16213e] to-[#0f0f23] p-4">
+      <div className="max-w-2xl mx-auto">
+        <div className="text-center mb-8">
+          <p className="text-gray-400 mb-2">{roomType === 'Party' ? 'Tryb Impreza' : 'Tryb Normalny'}</p>
+          <h1 className="text-3xl font-bold text-white mb-6">Poczekalnia</h1>
+          
+          <div className="inline-flex items-center gap-4 bg-[#2a2a4a] rounded-2xl p-4 border border-white/10">
+            <div>
+              <p className="text-gray-400 text-sm mb-1">Kod pokoju</p>
+              <p className="text-3xl font-mono font-bold text-white tracking-widest">{roomCode}</p>
+            </div>
+            <button
+              onClick={handleCopyCode}
+              className={`p-3 rounded-xl transition-all ${
+                copied ? 'bg-green-500 text-black' : 'bg-white/10 hover:bg-white/20 text-white'
+              }`}
             >
-              <Copy className="w-5 h-5 text-gray-400" />
+              {copied ? (
+                <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                </svg>
+              ) : (
+                <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                </svg>
+              )}
             </button>
+          </div>
+        </div>
+
+        <div className="bg-[#2a2a4a]/50 rounded-2xl p-6 border border-white/10 mb-6">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-xl font-bold text-white">Gracze ({players.length})</h2>
             {!isHost && (
-              <input
-                type="text"
-                value={nickname}
-                onChange={(e) => setNickname(e.target.value)}
-                placeholder="Twój nick"
-                className="bg-white/20 border border-white/30 rounded px-3 py-1 text-sm text-white placeholder-gray-400 focus:outline-none focus:border-white/50"
-              />
+              <span className="text-sm text-gray-400">Czekam na hosta...</span>
+            )}
+          </div>
+
+          <div className="space-y-3">
+            {players.map((player, index) => (
+              <div
+                key={player.id}
+                className={`flex items-center gap-4 p-4 rounded-xl ${
+                  player.isHost ? 'bg-green-500/10 border border-green-500/30' : 'bg-white/5'
+                }`}
+              >
+                <div className={`w-10 h-10 rounded-full flex items-center justify-center text-lg font-bold ${
+                  player.isHost ? 'bg-green-500 text-black' : 'bg-purple-500 text-white'
+                }`}>
+                  {index + 1}
+                </div>
+                <div className="flex-1">
+                  <p className="font-bold text-white">{player.name}</p>
+                  {player.isHost && (
+                    <p className="text-xs text-green-400">Host</p>
+                  )}
+                </div>
+                {player.name === userName && (
+                  <span className="text-xs bg-white/10 text-gray-400 px-2 py-1 rounded-full">Ty</span>
+                )}
+              </div>
+            ))}
+
+            {players.length < 2 && isHost && (
+              <div className="text-center py-8 text-gray-500">
+                <p>Czekam na graczy...</p>
+                <p className="text-sm mt-2">Udostępnij kod pokoju znajomym</p>
+              </div>
             )}
           </div>
         </div>
-      </div>
 
-      <div className="flex items-center gap-2 text-sm text-gray-400">
-        {localPeerId ? (
-          <>
-            <Wifi className="w-4 h-4 text-green-400" />
-            <span>PeerJS: {localPeerId}</span>
-          </>
-        ) : (
-          <>
-            <WifiOff className="w-4 h-4 text-red-400" />
-            <span>Łączenie...</span>
-          </>
-        )}
-      </div>
-
-      <Card className="w-full max-w-2xl p-6 min-h-[300px]">
-        <div className="flex items-center gap-2 mb-6">
-          <Users className="w-5 h-5 text-[#1DB954]" />
-          <h3 className="text-xl font-bold">{t.playersConnected} {players.length}</h3>
-        </div>
-
-        <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-          {players.map((name, i) => (
-            <div key={i} className="bg-white/5 p-4 rounded-lg flex items-center gap-3 animate-fade-in">
-              <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold ${i === 0 && isHost ? 'bg-[#1DB954] text-black' : 'bg-blue-500 text-white'}`}>
-                {name[0]}
-              </div>
-              <span className="font-medium">{name}</span>
+        <div className="bg-[#2a2a4a]/30 rounded-xl p-4 mb-6">
+          <div className="grid grid-cols-3 gap-4 text-center">
+            <div>
+              <p className="text-gray-400 text-sm">Rundy</p>
+              <p className="text-white font-bold">{roundsCount}</p>
             </div>
-          ))}
+            <div>
+              <p className="text-gray-400 text-sm">Czas</p>
+              <p className="text-white font-bold">{roundTime}s</p>
+            </div>
+            <div>
+              <p className="text-gray-400 text-sm">Tryb</p>
+              <p className="text-white font-bold">{gameMode}</p>
+            </div>
+          </div>
         </div>
 
-        {players.length === 0 && (
-          <div className="mt-12 text-center text-gray-500 italic">
-            {t.waitingForPlayers}
-          </div>
-        )}
-      </Card>
-
-      {isHost && (
-        <Button 
-          size="lg" 
-          className="w-full max-w-md gap-2 bg-[#1DB954] hover:bg-[#1ed760] text-black font-bold"
-          onClick={handleStart}
-        >
-          <Play className="w-5 h-5 fill-current" />
-          {t.startNow}
-        </Button>
-      )}
+        <div className="flex gap-4">
+          <button
+            onClick={handleLeave}
+            className="flex-1 py-4 bg-white/10 hover:bg-white/20 text-white font-bold rounded-xl transition-all"
+          >
+            Wyjdź
+          </button>
+          
+          {isHost && (
+            <button
+              onClick={handleStartGame}
+              disabled={players.length < 1}
+              className={`flex-1 py-4 font-bold rounded-xl transition-all flex items-center justify-center gap-2 ${
+                players.length >= 1
+                  ? 'bg-green-500 hover:bg-green-400 text-black'
+                  : 'bg-gray-700 text-gray-500 cursor-not-allowed'
+              }`}
+            >
+              Rozpocznij grę
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+                <path strokeLinecap="round" strokeLinejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            </button>
+          )}
+        </div>
+      </div>
     </div>
   );
-};
-
-export default Lobby;
+}

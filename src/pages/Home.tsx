@@ -1,130 +1,80 @@
-import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Music, Mic2, Users, Play, LogIn } from 'lucide-react';
 import { useGameStore } from '../store/gameStore';
 import { redirectToAuthCodeFlow } from '../lib/spotify';
-import { Button } from '../components/ui/Button';
-import { Layout } from '../components/Layout';
-import { Card } from '../components/ui/Card';
-import { translations } from '../lib/translations';
 
-const Home = () => {
+export default function Home() {
   const navigate = useNavigate();
-  const { setGameSettings, token, language, joinRoom } = useGameStore();
-  const t = translations[language];
-  const [joinCode, setJoinCode] = useState("");
-  const [showJoinInput, setShowJoinInput] = useState(false);
+  const { token } = useGameStore();
 
-  const handleSoloPlay = () => {
-    setGameSettings({ roomType: 'Solo' });
-    navigate('/setup');
-  };
-
-  const handleHostParty = () => {
-    setGameSettings({ roomType: 'LocalHost' });
-    navigate('/setup');
+  const handleLogin = async () => {
+    await redirectToAuthCodeFlow();
   };
 
   const handleJoinParty = () => {
-    if (!joinCode) return;
-    joinRoom(joinCode);
-    navigate('/lobby');
+    navigate('/join');
   };
 
   return (
-    <Layout>
-      <div className="max-w-4xl mx-auto text-center space-y-12 animate-fade-in">
-        <div className="space-y-4">
-          <h1 className="text-6xl font-black text-transparent bg-clip-text bg-gradient-to-r from-green-400 to-emerald-600 tracking-tight">
-            {t.appTitle}
+    <div className="min-h-screen bg-gradient-to-b from-[#1a1a2e] via-[#16213e] to-[#0f0f23] flex items-center justify-center p-4">
+      <div className="max-w-md w-full">
+        <div className="text-center mb-12">
+          <div className="w-24 h-24 mx-auto mb-6 bg-gradient-to-br from-green-400 to-green-600 rounded-full flex items-center justify-center shadow-2xl shadow-green-500/30">
+            <svg className="w-12 h-12 text-white" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M12 0C5.4 0 0 5.4 0 12s5.4 12 12 12 12-5.4 12-12S18.66 0 12 0zm5.521 17.34c-.24.359-.66.48-1.021.24-2.82-1.74-6.36-2.101-10.561-1.141-.418.122-.779-.179-.899-.539-.12-.421.18-.78.54-.9 4.56-1.021 8.52-.6 11.64 1.32.42.18.479.659.301 1.02zm1.44-3.3c-.301.42-.841.6-1.262.3-3.239-1.98-8.159-2.58-11.939-1.38-.479.12-1.02-.12-1.14-.6-.12-.48.12-1.021.6-1.141C9.6 9.9 15 10.561 18.72 12.84c.361.181.54.78.241 1.2zm.12-3.36C15.24 8.4 8.82 8.16 5.16 9.301c-.6.179-1.2-.181-1.38-.721-.18-.601.18-1.2.72-1.381 4.26-1.26 11.28-1.02 15.721 1.621.539.3.719 1.02.419 1.56-.299.421-1.02.599-1.559.3z"/>
+            </svg>
+          </div>
+          <h1 className="text-4xl font-bold text-white mb-3">
+            Spotify Quiz
           </h1>
-          <p className="text-xl text-gray-400 max-w-2xl mx-auto">
-            {t.subtitle}
+          <p className="text-gray-400 text-lg">
+            Zgaduj utwory i rywalizuj ze znajomymi!
           </p>
         </div>
 
-        <div className="grid md:grid-cols-3 gap-6 max-w-5xl mx-auto">
-          {/* Solo */}
-          {token && (
-            <Card className="p-6 hover:border-green-500/50 transition-colors group cursor-pointer h-full" onClick={handleSoloPlay}>
-              <div className="h-12 w-12 bg-green-500/10 rounded-xl flex items-center justify-center mb-4 group-hover:bg-green-500/20 transition-colors mx-auto">
-                <Music className="w-6 h-6 text-green-500" />
-              </div>
-              <h3 className="text-xl font-bold text-white mb-2">{t.soloMode}</h3>
-              <p className="text-gray-400 text-sm">{t.soloDesc}</p>
-            </Card>
-          )}
-
-          {/* Host */}
-          <Card className={`p-6 hover:border-purple-500/50 transition-colors group cursor-pointer h-full ${!token ? 'opacity-50 cursor-not-allowed' : ''}`} onClick={token ? handleHostParty : undefined}>
-            <div className="h-12 w-12 bg-purple-500/10 rounded-xl flex items-center justify-center mb-4 group-hover:bg-purple-500/20 transition-colors mx-auto">
-              <Mic2 className="w-6 h-6 text-purple-500" />
-            </div>
-            <h3 className="text-xl font-bold text-white mb-2">{t.hostMode}</h3>
-            <p className="text-gray-400 text-sm">{t.hostDesc}</p>
-            {!token && (
-              <div className="mt-2 text-xs text-gray-500 italic">Wymaga logowania</div>
-            )}
-          </Card>
-
-          {/* Join */}
-          <Card className="p-6 hover:border-blue-500/50 transition-colors group cursor-pointer h-full flex flex-col justify-between">
-            <div onClick={() => setShowJoinInput(!showJoinInput)}>
-               <div className="h-12 w-12 bg-blue-500/10 rounded-xl flex items-center justify-center mb-4 group-hover:bg-blue-500/20 transition-colors mx-auto">
-                <Users className="w-6 h-6 text-blue-500" />
-              </div>
-              <h3 className="text-xl font-bold text-white mb-2">{t.joinMode}</h3>
-              <p className="text-gray-400 text-sm mb-4">{t.joinDesc}</p>
-            </div>
-            
-            {showJoinInput && (
-              <div className="space-y-2 animate-fade-in" onClick={(e) => e.stopPropagation()}>
-                <input
-                  type="text"
-                  placeholder={t.enterCode}
-                  value={joinCode}
-                  onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
-                  maxLength={6}
-                  className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-center font-mono tracking-widest uppercase focus:border-blue-500 outline-none"
-                />
-                <Button 
-                  size="sm" 
-                  className="w-full bg-blue-600 hover:bg-blue-500"
-                  onClick={handleJoinParty}
-                >
-                  {t.join}
-                </Button>
-              </div>
-            )}
-          </Card>
-        </div>
-
-        <div className="pt-8 border-t border-white/10">
-          
-          {!token ? (
-            <div className="flex flex-col items-center gap-4">
-              <p className="text-gray-500 text-sm">
-                {t.guest} {t.or} {t.loginSpotify}
-              </p>
-              <Button 
-                onClick={redirectToAuthCodeFlow} 
-                size="lg" 
-                className="gap-3 bg-[#1DB954] hover:bg-[#1ed760] text-black font-bold px-8"
-              >
-                <Play className="w-5 h-5 fill-current" />
-                {t.loginSpotify}
-              </Button>
-            </div>
+        <div className="space-y-4">
+          {token ? (
+            <button
+              onClick={() => navigate('/mode')}
+              className="w-full py-4 px-6 bg-gradient-to-r from-green-500 to-green-600 hover:from-green-400 hover:to-green-500 text-white font-bold text-lg rounded-full transition-all transform hover:scale-[1.02] shadow-lg shadow-green-500/30"
+            >
+              Kontynuuj
+            </button>
           ) : (
-             <div className="text-green-400 font-medium flex items-center justify-center gap-2">
-               <LogIn className="w-5 h-5" />
-               {t.loggedInAs} Spotify User
-             </div>
+            <button
+              onClick={handleLogin}
+              className="w-full py-4 px-6 bg-gradient-to-r from-green-500 to-green-600 hover:from-green-400 hover:to-green-500 text-white font-bold text-lg rounded-full transition-all transform hover:scale-[1.02] shadow-lg shadow-green-500/30 flex items-center justify-center gap-3"
+            >
+              <svg className="w-6 h-6" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M12 0C5.4 0 0 5.4 0 12s5.4 12 12 12 12-5.4 12-12S18.66 0 12 0zm5.521 17.34c-.24.359-.66.48-1.021.24-2.82-1.74-6.36-2.101-10.561-1.141-.418.122-.779-.179-.899-.539-.12-.421.18-.78.54-.9 4.56-1.021 8.52-.6 11.64 1.32.42.18.479.659.301 1.02zm1.44-3.3c-.301.42-.841.6-1.262.3-3.239-1.98-8.159-2.58-11.939-1.38-.479.12-1.02-.12-1.14-.6-.12-.48.12-1.021.6-1.141C9.6 9.9 15 10.561 18.72 12.84c.361.181.54.78.241 1.2zm.12-3.36C15.24 8.4 8.82 8.16 5.16 9.301c-.6.179-1.2-.181-1.38-.721-.18-.601.18-1.2.72-1.381 4.26-1.26 11.28-1.02 15.721 1.621.539.3.719 1.02.419 1.56-.299.421-1.02.599-1.559.3z"/>
+              </svg>
+              Zaloguj się przez Spotify
+            </button>
           )}
-        </div>
-      </div>
-    </Layout>
-  );
-};
 
-export default Home;
+          <div className="relative">
+            <div className="absolute inset-0 flex items-center">
+              <div className="w-full border-t border-gray-700"></div>
+            </div>
+            <div className="relative flex justify-center text-sm">
+              <span className="px-4 bg-[#16213e] text-gray-500">lub</span>
+            </div>
+          </div>
+
+          <button
+            onClick={handleJoinParty}
+            className="w-full py-4 px-6 bg-[#2a2a4a] hover:bg-[#3a3a5a] text-white font-bold text-lg rounded-full transition-all border border-purple-500/30 flex items-center justify-center gap-3"
+          >
+            <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+            </svg>
+            Dołącz do imprezy
+          </button>
+        </div>
+
+        <p className="text-center text-gray-600 text-sm mt-8">
+          Wymagane konto Spotify Premium do odtwarzania muzyki
+        </p>
+      </div>
+    </div>
+  );
+}

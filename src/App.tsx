@@ -1,50 +1,27 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import Home from './pages/Home';
+import Callback from './pages/Callback';
+import DeviceSelect from './pages/DeviceSelect';
+import ModeSelect from './pages/ModeSelect';
 import Setup from './pages/Setup';
+import JoinLobby from './pages/JoinLobby';
+import Lobby from './pages/Lobby';
 import Game from './pages/Game';
 import Results from './pages/Results';
-import Lobby from './pages/Lobby';
-import Callback from './pages/Callback';
-import { useGameStore } from './store/gameStore';
 
-function ProtectedRoute({ children, status }: { children: React.ReactNode, status: string | string[] }) {
-  const { gameStatus } = useGameStore();
-  const allowed = Array.isArray(status) ? status.includes(gameStatus) : gameStatus === status;
-  
-  if (!allowed) return <Navigate to="/" />;
-  return <>{children}</>;
-}
-
-export default function App() {
+export function App() {
   return (
     <BrowserRouter>
       <Routes>
         <Route path="/" element={<Home />} />
-        <Route path="/home" element={<Home />} /> 
-        
-        <Route path="/setup" element={<Setup />} />
-        
-        <Route path="/lobby" element={
-          <ProtectedRoute status="lobby">
-            <Lobby />
-          </ProtectedRoute>
-        } />
-
-        <Route path="/game" element={
-          <ProtectedRoute status={['playing', 'lobby']}> {/* Allow lobby to transition to game */}
-            <Game />
-          </ProtectedRoute>
-        } />
-        
-        <Route path="/results" element={
-          <ProtectedRoute status="results">
-             <Results />
-          </ProtectedRoute>
-        } />
-        
         <Route path="/callback" element={<Callback />} />
-        
-        <Route path="*" element={<Navigate to="/" />} />
+        <Route path="/device" element={<DeviceSelect />} />
+        <Route path="/mode" element={<ModeSelect />} />
+        <Route path="/setup" element={<Setup />} />
+        <Route path="/join" element={<JoinLobby />} />
+        <Route path="/lobby" element={<Lobby />} />
+        <Route path="/game" element={<Game />} />
+        <Route path="/results" element={<Results />} />
       </Routes>
     </BrowserRouter>
   );
