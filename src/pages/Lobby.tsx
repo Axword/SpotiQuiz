@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useGameStore } from '../store/gameStore';
+import { Layout } from '../components/Layout';
 import Peer, { DataConnection } from 'peerjs';
 
 interface PeerMessage {
@@ -16,12 +17,15 @@ export default function Lobby() {
     isHost,
     userName,
     tracks,
+    allTracks,
+    gameTracks,
     gameMode,
     roundsCount,
     roundTime,
     roomType,
     setPlayers,
     addPlayer,
+    setGameState,
     startGame
   } = useGameStore();
 
@@ -129,8 +133,10 @@ export default function Lobby() {
 
       case 'start-game':
         if (!isHost) {
-          useGameStore.setState({
+          setGameState({
             tracks: message.payload.tracks,
+            allTracks: message.payload.allTracks,
+            gameTracks: message.payload.gameTracks,
             gameMode: message.payload.gameMode,
             roundsCount: message.payload.roundsCount,
             roundTime: message.payload.roundTime,
@@ -164,7 +170,15 @@ export default function Lobby() {
 
     broadcastToAll({
       type: 'start-game',
-      payload: { tracks, gameMode, roundsCount, roundTime, roomType }
+      payload: { 
+        tracks, 
+        allTracks, 
+        gameTracks,
+        gameMode, 
+        roundsCount, 
+        roundTime, 
+        roomType 
+      }
     });
 
     startGame();
@@ -201,8 +215,9 @@ export default function Lobby() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-[#1a1a2e] via-[#16213e] to-[#0f0f23] p-4">
-      <div className="max-w-2xl mx-auto">
+    <Layout>
+      <div className="min-h-[calc(100vh-64px)] p-4">
+        <div className="max-w-2xl mx-auto">
         <div className="text-center mb-8">
           <p className="text-gray-400 mb-2">{roomType === 'Party' ? 'Tryb Impreza' : 'Tryb Normalny'}</p>
           <h1 className="text-3xl font-bold text-white mb-6">Poczekalnia</h1>
@@ -316,7 +331,8 @@ export default function Lobby() {
             </button>
           )}
         </div>
+        </div>
       </div>
-    </div>
+    </Layout>
   );
 }

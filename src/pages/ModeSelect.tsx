@@ -1,5 +1,6 @@
 import { useNavigate } from 'react-router-dom';
 import { useGameStore } from '../store/gameStore';
+import { Layout } from '../components/Layout';
 
 export default function ModeSelect() {
   const navigate = useNavigate();
@@ -38,8 +39,9 @@ export default function ModeSelect() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-[#1a1a2e] via-[#16213e] to-[#0f0f23] flex items-center justify-center p-4">
-      <div className="max-w-2xl w-full">
+    <Layout>
+      <div className="min-h-[calc(100vh-64px)] flex items-center justify-center p-4">
+        <div className="max-w-2xl w-full">
         <div className="text-center mb-10">
           <h1 className="text-4xl font-bold text-white mb-3">Wybierz tryb gry</h1>
           <p className="text-gray-400">Co chcesz dzisiaj robić?</p>
@@ -127,7 +129,8 @@ export default function ModeSelect() {
           </svg>
           Wyloguj się
         </button>
+        </div>
       </div>
-    </div>
+    </Layout>
   );
 }

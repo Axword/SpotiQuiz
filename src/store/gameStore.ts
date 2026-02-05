@@ -31,6 +31,8 @@ interface GameState {
   roundTime: number;
   
   tracks: SpotifyTrack[];
+  allTracks: SpotifyTrack[];
+  gameTracks: SpotifyTrack[];
   currentRound: number;
   currentTrack: SpotifyTrack | null;
   options: SpotifyTrack[];
@@ -49,9 +51,12 @@ interface GameState {
   removePlayer: (id: string) => void;
   updatePlayerScore: (id: string, score: number) => void;
   setIsHost: (isHost: boolean) => void;
+  setPlayerAnswered: (playerId: string, answered: boolean) => void;
+  allPlayersAnswered: () => boolean;
   
   setGameSettings: (settings: Partial<{ gameMode: GameMode; roundsCount: number; roundTime: number }>) => void;
   setTracks: (tracks: SpotifyTrack[]) => void;
+  setGameState: (gameState: { tracks: SpotifyTrack[]; allTracks: SpotifyTrack[]; gameTracks: SpotifyTrack[]; gameMode: GameMode; roundsCount: number; roundTime: number; roomType: RoomType }) => void;
   
   startGame: () => void;
   nextRound: () => void;
@@ -72,16 +77,25 @@ const generateCode = () => {
   return code;
 };
 
-const generateOptions = (tracks: SpotifyTrack[], correctTrack: SpotifyTrack): SpotifyTrack[] => {
+const shuffleArray = <T>(array: T[]): T[] => {
+  const arr = [...array];
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+};
+
+const generateOptions = (allTracks: SpotifyTrack[], correctTrack: SpotifyTrack): SpotifyTrack[] => {
   const options = [correctTrack];
-  const otherTracks = tracks.filter(t => t.id !== correctTrack.id);
+  const otherTracks = allTracks.filter(t => t.id !== correctTrack.id);
+  const shuffledOthers = shuffleArray(otherTracks);
   
-  while (options.length < 4 && otherTracks.length > 0) {
-    const randomIndex = Math.floor(Math.random() * otherTracks.length);
-    options.push(otherTracks.splice(randomIndex, 1)[0]);
+  for (let i = 0; i < Math.min(3, shuffledOthers.length); i++) {
+    options.push(shuffledOthers[i]);
   }
   
-  return options.sort(() => Math.random() - 0.5);
+  return shuffleArray(options);
 };
 
 export const useGameStore = create<GameState>()(
@@ -102,6 +116,8 @@ export const useGameStore = create<GameState>()(
       roundTime: 30,
       
       tracks: [],
+      allTracks: [],
+      gameTracks: [],
       currentRound: 0,
       currentTrack: null,
       options: [],
@@ -123,41 +139,74 @@ export const useGameStore = create<GameState>()(
       })),
       setIsHost: (isHost) => set({ isHost }),
       
+      setPlayerAnswered: (playerId, answered) => set((state) => ({
+        players: state.players.map(p => 
+          p.id === playerId ? { ...p, hasAnswered: answered } : p
+        )
+      })),
+      
+      allPlayersAnswered: () => {
+        const state = get();
+        const nonHostPlayers = state.players.filter(p => !p.isHost);
+        if (nonHostPlayers.length === 0) return true;
+        return nonHostPlayers.every(p => p.hasAnswered);
+      },
+      
       setGameSettings: (settings) => set((state) => ({
         gameMode: settings.gameMode ?? state.gameMode,
         roundsCount: settings.roundsCount ?? state.roundsCount,
         roundTime: settings.roundTime ?? state.roundTime
       })),
-      setTracks: (tracks) => set({ tracks }),
+      setTracks: (tracks) => {
+        const shuffledForGame = shuffleArray(tracks);
+        const shuffledAllTracks = shuffleArray([...tracks]);
+        const allTracksCapped = shuffledAllTracks.length > 200 ? shuffledAllTracks.slice(0, 200) : shuffledAllTracks;
+        set({ 
+          tracks: shuffledForGame,
+          allTracks: allTracksCapped,
+          gameTracks: shuffledForGame
+        });
+      },
+      
+      setGameState: (gameState: { tracks: SpotifyTrack[]; allTracks: SpotifyTrack[]; gameTracks: SpotifyTrack[]; gameMode: GameMode; roundsCount: number; roundTime: number; roomType: RoomType }) => {
+        set({
+          tracks: gameState.tracks,
+          allTracks: gameState.allTracks,
+          gameTracks: gameState.gameTracks,
+          gameMode: gameState.gameMode,
+          roundsCount: gameState.roundsCount,
+          roundTime: gameState.roundTime,
+          roomType: gameState.roomType
+        });
+      },
       
       startGame: () => {
         const state = get();
-        const shuffledTracks = [...state.tracks].sort(() => Math.random() - 0.5);
-        const firstTrack = shuffledTracks[0];
+        const firstTrack = state.gameTracks[0];
+        if (!firstTrack) return;
         set({
-          tracks: shuffledTracks,
           currentRound: 1,
           currentTrack: firstTrack,
-          options: generateOptions(shuffledTracks, firstTrack),
+          options: generateOptions(state.allTracks, firstTrack),
           isPlaying: true,
           roundStartTime: Date.now(),
           showAnswer: false,
-          players: state.players.map(p => ({ ...p, hasAnswered: false }))
+          players: state.players.map(p => ({ ...p, hasAnswered: false, score: 0 }))
         });
       },
       
       nextRound: () => {
         const state = get();
         const nextRoundNum = state.currentRound + 1;
-        if (nextRoundNum > state.roundsCount || nextRoundNum > state.tracks.length) {
+        if (nextRoundNum > state.roundsCount || nextRoundNum > state.gameTracks.length) {
           set({ isPlaying: false });
           return;
         }
-        const nextTrack = state.tracks[nextRoundNum - 1];
+        const nextTrack = state.gameTracks[nextRoundNum - 1];
         set({
           currentRound: nextRoundNum,
           currentTrack: nextTrack,
-          options: generateOptions(state.tracks, nextTrack),
+          options: generateOptions(state.allTracks, nextTrack),
           roundStartTime: Date.now(),
           showAnswer: false,
           players: state.players.map(p => ({ ...p, hasAnswered: false, lastAnswerCorrect: undefined, lastAnswerTime: undefined }))
@@ -187,6 +236,8 @@ export const useGameStore = create<GameState>()(
       
       resetGame: () => set({
         tracks: [],
+        allTracks: [],
+        gameTracks: [],
         currentRound: 0,
         currentTrack: null,
         options: [],
@@ -208,6 +259,8 @@ export const useGameStore = create<GameState>()(
           players: [],
           isHost: false,
           tracks: [],
+          allTracks: [],
+          gameTracks: [],
           currentRound: 0,
           currentTrack: null,
           options: [],
