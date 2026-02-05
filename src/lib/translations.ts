@@ -100,6 +100,7 @@ export const translations = {
     loginSpotify: "Login with Spotify",
     continueGuest: "Continue as Guest",
     or: "or",
+    authenticating: "Trwa uwierzytelnianie...",
   }
 };
 

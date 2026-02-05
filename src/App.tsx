@@ -4,6 +4,7 @@ import Setup from './pages/Setup';
 import Game from './pages/Game';
 import Results from './pages/Results';
 import Lobby from './pages/Lobby';
+import Callback from './pages/Callback';
 import { useGameStore } from './store/gameStore';
 
 function ProtectedRoute({ children, status }: { children: React.ReactNode, status: string | string[] }) {
@@ -40,6 +41,8 @@ export default function App() {
              <Results />
           </ProtectedRoute>
         } />
+        
+        <Route path="/callback" element={<Callback />} />
         
         <Route path="*" element={<Navigate to="/" />} />
       </Routes>

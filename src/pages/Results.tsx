@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import confetti from 'canvas-confetti';
-import { Trophy, RefreshCw, Home } from 'lucide-react';
+import { Trophy, RefreshCw, Home, Users } from 'lucide-react';
 import { useGameStore } from '../store/gameStore';
 import { Button } from '../components/ui/Button';
 import { Layout } from '../components/Layout';
@@ -42,8 +42,11 @@ const Results = () => {
   }, []);
 
   const handlePlayAgain = () => {
+    // Only reset game state, keep user and token
     resetGame();
-    navigate('/setup');
+    setTimeout(() => {
+      navigate('/setup');
+    }, 100);
   };
 
   const handleGoHome = () => {

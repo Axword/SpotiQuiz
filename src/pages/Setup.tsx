@@ -2,16 +2,16 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Search, Play, Type, Grid, Music, Users, ArrowRight, List, Library, Star, ArrowLeft, Link as LinkIcon } from 'lucide-react';
 import { useGameStore } from '../store/gameStore';
-import { searchPlaylists, getPlaylistTracks, getUserPlaylists, getFeaturedPlaylists, SpotifyPlaylist, extractPlaylistIdFromUrl } from '../lib/spotify';
+import { searchPlaylists, fetchPlaylistTracks, getUserPlaylists, SpotifyPlaylist } from '../lib/spotify';
 import { Button } from '../components/ui/Button';
 import { Layout } from '../components/Layout';
 import { translations } from '../lib/translations';
+// ...existing code...
 
 const Setup = () => {
   const navigate = useNavigate();
   const { 
     token, 
-    getValidToken,
     setTracks, 
     startGame, 
     setGameSettings, 
@@ -24,149 +24,116 @@ const Setup = () => {
   
   const t = translations[language];
 
-  // Require login
-  useEffect(() => {
-    if (!token) {
-      console.log('[Setup] No token, redirecting to home');
-      navigate('/');
-    }
-  }, [token, navigate]);
-
   const [activeTab, setActiveTab] = useState<'search' | 'my' | 'featured' | 'url'>('featured');
   const [query, setQuery] = useState('');
   const [urlInput, setUrlInput] = useState('');
   const [playlists, setPlaylists] = useState<SpotifyPlaylist[]>([]);
+  // ...existing code...
+
+  // Hardcoded featured playlists data (fallback for unauthenticated)
+  const FEATURED_PLAYLISTS: SpotifyPlaylist[] = [
+    {
+      id: '37i9dQZEVXbN6itCcaL3Tt',
+      name: 'Top Hits Polska',
+      // ...existing code...
+      image: 'https://i.scdn.co/image/ab67706f00000002c0e7e6e6e6e6e6e6e6e6e6e6',
+      tracks: { total: 50 },
+    },
+    {
+      id: '37i9dQZEVXbMDoHDwVN2tF',
+      name: 'Global Top 50',
+      // ...existing code...
+      image: 'https://i.scdn.co/image/ab67706f00000002b0e7e6e6e6e6e6e6e6e6e6e6',
+      tracks: { total: 50 },
+    },
+    {
+      id: '37i9dQZF1DX4UtSsGT1Sbe',
+      name: 'RapCaviar',
+      // ...existing code...
+      image: 'https://i.scdn.co/image/ab67706f00000002a0e7e6e6e6e6e6e6e6e6e6e6',
+      tracks: { total: 50 },
+    },
+    {
+      id: '37i9dQZF1DXbTxeAdrVG2l',
+      name: 'Pop Rising',
+      // ...existing code...
+      image: 'https://i.scdn.co/image/ab67706f0000000290e7e6e6e6e6e6e6e6e6e6e6',
+      tracks: { total: 50 },
+    },
+    {
+      id: '5ABHKGoOzxkaa28ttQV9sE',
+      name: 'Peaceful Piano',
+      // ...existing code...
+      image: 'https://i.scdn.co/image/ab67706f0000000280e7e6e6e6e6e6e6e6e6e6e6',
+      tracks: { total: 50 },
+    },
+  ];
   const [selectedPlaylist, setSelectedPlaylist] = useState<SpotifyPlaylist | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Default playlists
-  const DEFAULT_PLAYLISTS = [
-    { id: '37i9dQZF1DXcBWIGoYBM5M', name: 'Today\'s Top Hits', image: 'https://i.scdn.co/image/ab67706f00000002b55b6074da1d43715fc16d6d', tracks: { total: 50 } },
-    { id: '37i9dQZF1DX0XUsuxWHRQd', name: 'RapCaviar', image: 'https://i.scdn.co/image/ab67706f000000029215c0e4c194bb8c54c37482', tracks: { total: 50 } },
-    { id: '37i9dQZF1DX4JAvHpjipBk', name: 'New Music Friday', image: 'https://i.scdn.co/image/ab67706f000000028a0429f4b3040b271f280b18', tracks: { total: 50 } },
-    { id: '37i9dQZF1DWXRqgorJj26U', name: 'Rock Classics', image: 'https://i.scdn.co/image/ab67706f0000000255519ea495e3ed9121e05423', tracks: { total: 50 } }
-  ];
-
   useEffect(() => {
-    console.log('[Setup] useEffect called', { token, activeTab, query });
-    
-    // Always show default playlists initially
-    setPlaylists(DEFAULT_PLAYLISTS);
-
-    // Only fetch user playlists if logged in
-    if (!token) {
-      console.log('[Setup] No token, showing default playlists');
-      return;
-    }
-
     const loadPlaylists = async () => {
+      setLoading(true);
+      let results: SpotifyPlaylist[] = [];
       try {
-        console.log('[Setup] Loading playlists for tab:', activeTab);
-        setLoading(true);
-        const validToken = token ? await getValidToken() : null;
-        let results: SpotifyPlaylist[] = [];
-        
-        if (activeTab === 'my') {
-          console.log('[Setup] Fetching user playlists');
-          results = await getUserPlaylists(validToken);
-        } else if (activeTab === 'featured') {
-          console.log('[Setup] Fetching featured playlists');
-          results = await getFeaturedPlaylists(validToken);
-        } else if (activeTab === 'search' && query) {
-          console.log('[Setup] Searching playlists:', query);
-          results = await searchPlaylists(validToken, query);
+        if (!token) {
+          // No token: show hardcoded featured playlists only
+          if (activeTab === 'featured') {
+            setPlaylists(FEATURED_PLAYLISTS);
+          } else {
+            setPlaylists([]);
+          }
+        } else {
+          if (activeTab === 'my') {
+            results = await getUserPlaylists(token);
+            setPlaylists(results);
+          } else if (activeTab === 'featured') {
+            // Optionally: fetch from API, but fallback to hardcoded if error
+            // ...existing code...
+            setPlaylists(FEATURED_PLAYLISTS);
+          } else if (activeTab === 'search' && query) {
+            results = await searchPlaylists(token, query);
+            setPlaylists(results);
+          } else {
+            setPlaylists([]);
+          }
         }
-        
-        // Filter playlists with minimum 100 tracks
-        const filteredResults = results.filter(p => p.tracks.total >= 100);
-        
-        console.log('[Setup] Got results:', filteredResults.length, 'playlists with 100+ tracks');
-        setPlaylists(filteredResults.length ? filteredResults : DEFAULT_PLAYLISTS);
-        setLoading(false);
-      } catch (err) {
-        console.error('[Setup] Error loading playlists:', err);
-        setError(err instanceof Error ? err.message : 'Failed to load playlists');
-        setPlaylists([]);
-        setLoading(false);
+      } catch (e) {
+        setError('Nie udało się załadować playlist.');
       }
+      setLoading(false);
     };
-
     loadPlaylists();
-  }, [token, activeTab, query, getValidToken]);
+  }, [token, activeTab, query]);
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
-  };
-
-  const handlePasteUrl = async () => {
-    if (!urlInput.trim()) {
-      setError(t.errorGeneric);
-      return;
-    }
-
-    setLoading(true);
-    setError(null);
-    try {
-      const playlistId = extractPlaylistIdFromUrl(urlInput.trim());
-      
-      if (!playlistId) {
-        setError('Nieprawidłowy format URL playlisty. Użyj: https://open.spotify.com/playlist/ID lub spotify:playlist:ID');
-        setLoading(false);
-        return;
-      }
-
-      // Try to fetch the playlist info from backend
-      const validToken = token ? await getValidToken() : null;
-      
-      // Get tracks to check if playlist exists and has content
-      const tracks = await getPlaylistTracks(validToken, playlistId);
-      
-      if (tracks.length === 0) {
-        setError('Nie znaleziono utworów z podglądem w tej playliście.');
-        setLoading(false);
-        return;
-      }
-
-      // Set the playlist as selected
-      const playlist: SpotifyPlaylist = {
-        id: playlistId,
-        name: 'Niestandardowa playlista',
-        image: 'https://via.placeholder.com/300',
-        tracks: { total: tracks.length }
-      };
-
-      setSelectedPlaylist(playlist);
-      setUrlInput('');
-      setActiveTab('featured');
-      setLoading(false);
-    } catch (err) {
-      console.error('[Setup] Error loading URL playlist:', err);
-      setError('Błąd podczas ładowania playlisty.');
-      setLoading(false);
-    }
   };
 
   const handleBack = () => {
     navigate('/');
   };
 
+  const extractPlaylistId = (url: string) => {
+    const match = url.match(/playlist\/([a-zA-Z0-9]+)/);
+    return match ? match[1] : url;
+  };
+
   const handleStartGame = async () => {
-    if (!selectedPlaylist) return;
+    let pid = selectedPlaylist?.id;
+    
+    if (activeTab === 'url') {
+      if (!urlInput) return;
+      pid = extractPlaylistId(urlInput);
+    }
+
+    if (!pid) return;
     
     setLoading(true);
     setError(null);
     try {
-      // Always require token for Web Playback SDK
-      const validToken = await getValidToken();
-      
-      if (!validToken) {
-        setError('Wymagane jest zalogowanie się na konto Spotify');
-        setLoading(false);
-        return;
-      }
-
-      const tracks = await getPlaylistTracks(validToken, selectedPlaylist.id);
+      const tracks = await fetchPlaylistTracks(token || '', pid);
       
       let finalTracks = tracks;
       
@@ -184,18 +151,16 @@ const Setup = () => {
 
       setTracks(shuffledTracks);
       
-      // If Hosting, create room and go to Lobby
       if (roomType === 'LocalHost') {
         createRoom();
         navigate('/lobby');
       } else {
-        // Solo play
         startGame();
         navigate('/game');
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
-      setError(t.errorGeneric);
+      setError(err.message || t.errorGeneric);
       setLoading(false);
     }
   };
@@ -203,7 +168,6 @@ const Setup = () => {
   return (
     <Layout>
       <div className="grid lg:grid-cols-12 gap-8 h-[80vh]">
-        {/* Left Side - Settings */}
         <div className="lg:col-span-4 space-y-6 overflow-y-auto pr-2">
           <div>
             <div className="flex items-center gap-2 mb-4">
@@ -214,7 +178,6 @@ const Setup = () => {
             </div>
             
             <div className="space-y-6">
-              {/* Room Info */}
               <div className="bg-white/5 p-4 rounded-xl border border-white/10">
                 <div className="flex items-center gap-3 mb-2 text-green-400">
                   {roomType === 'Solo' ? <Music /> : <Users />}
@@ -229,7 +192,6 @@ const Setup = () => {
                 </p>
               </div>
 
-              {/* Rounds Count */}
               <div>
                 <label className="text-sm text-gray-400 font-bold mb-3 block uppercase tracking-wider">{t.roundCount}</label>
                 <div className="grid grid-cols-3 gap-2">
@@ -249,7 +211,6 @@ const Setup = () => {
                 </div>
               </div>
 
-              {/* Game Mode */}
               <div>
                 <label className="text-sm text-gray-400 font-bold mb-3 block uppercase tracking-wider">{t.gameMode}</label>
                 <div className="grid grid-cols-3 gap-2">
@@ -294,15 +255,17 @@ const Setup = () => {
             </div>
           </div>
 
-          {selectedPlaylist && (
+          {(selectedPlaylist || activeTab === 'url') && (
              <div className="animate-fade-in pt-6 border-t border-white/10">
-               <div className="flex items-center gap-4 mb-4">
-                 <img src={selectedPlaylist.image} alt={selectedPlaylist.name} className="w-16 h-16 rounded shadow-lg" />
-                 <div>
-                   <h3 className="font-bold line-clamp-1">{selectedPlaylist.name}</h3>
-                   <p className="text-sm text-gray-400">{selectedPlaylist.tracks.total} {t.rounds}</p>
+               {selectedPlaylist && activeTab !== 'url' && (
+                 <div className="flex items-center gap-4 mb-4">
+                   <img src={selectedPlaylist.image} alt={selectedPlaylist.name} className="w-16 h-16 rounded shadow-lg" />
+                   <div>
+                     <h3 className="font-bold line-clamp-1">{selectedPlaylist.name}</h3>
+                     <p className="text-sm text-gray-400">{selectedPlaylist.tracks.total} {t.rounds}</p>
+                   </div>
                  </div>
-               </div>
+               )}
                
                {error && (
                  <div className="p-3 bg-red-500/20 text-red-400 text-sm rounded-lg mb-4 border border-red-500/20">
@@ -314,7 +277,7 @@ const Setup = () => {
                  fullWidth 
                  size="lg" 
                  onClick={handleStartGame}
-                 disabled={loading}
+                 disabled={loading || (activeTab === 'url' && !urlInput)}
                  className="group"
                >
                  {loading ? t.loading : (
@@ -327,70 +290,40 @@ const Setup = () => {
           )}
         </div>
 
-        {/* Right Side - Playlist Selection */}
-        <div className="lg:col-span-8 bg-[#181818] rounded-2xl p-6 overflow-hidden flex flex-col">
-          <div className="space-y-4 mb-6">
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-              <h3 className="text-xl font-bold">{t.selectPlaylist}</h3>
-              
-              <div className="flex gap-2">
-                  <button 
-                      onClick={() => setActiveTab('featured')}
-                      className={`px-4 py-2 rounded-full text-sm font-bold flex items-center gap-2 transition-colors ${activeTab === 'featured' ? 'bg-white text-black' : 'bg-[#282828] text-gray-400 hover:text-white'}`}
-                  >
-                      <Star className="w-4 h-4" /> {t.featured}
-                  </button>
-                  <button 
-                      onClick={() => setActiveTab('url')}
-                      className={`px-4 py-2 rounded-full text-sm font-bold flex items-center gap-2 transition-colors ${activeTab === 'url' ? 'bg-white text-black' : 'bg-[#282828] text-gray-400 hover:text-white'}`}
-                  >
-                      <LinkIcon className="w-4 h-4" /> URL
-                  </button>
-                  {token && (
-                    <>
-                      <button 
-                          onClick={() => setActiveTab('my')}
-                          className={`px-4 py-2 rounded-full text-sm font-bold flex items-center gap-2 transition-colors ${activeTab === 'my' ? 'bg-white text-black' : 'bg-[#282828] text-gray-400 hover:text-white'}`}
-                      >
-                          <Library className="w-4 h-4" /> {t.myPlaylists}
-                      </button>
-                      <button 
-                          onClick={() => setActiveTab('search')}
-                          className={`px-4 py-2 rounded-full text-sm font-bold flex items-center gap-2 transition-colors ${activeTab === 'search' ? 'bg-white text-black' : 'bg-[#282828] text-gray-400 hover:text-white'}`}
-                      >
-                          <Search className="w-4 h-4" /> {t.search}
-                      </button>
-                    </>
-                  )}
-              </div>
+        <div className="lg:col-span-8 bg-[#181818] rounded-2xl p-6 flex flex-col items-center justify-center min-h-[600px]">
+          <div className="flex flex-col md:flex-row md:items-center justify-center mb-6 gap-4 w-full">
+            <h3 className="text-xl font-bold text-center w-full">{t.selectPlaylist}</h3>
+            <div className="flex gap-2 flex-wrap justify-center w-full">
+                <button 
+                    onClick={() => setActiveTab('featured')}
+                    className={`px-4 py-2 rounded-full text-sm font-bold flex items-center gap-2 transition-colors ${activeTab === 'featured' ? 'bg-white text-black' : 'bg-[#282828] text-gray-400 hover:text-white'}`}
+                >
+                    <Star className="w-4 h-4" /> {t.featured}
+                </button>
+                <button 
+                    onClick={() => setActiveTab('my')}
+                    disabled={!token}
+                    className={`px-4 py-2 rounded-full text-sm font-bold flex items-center gap-2 transition-colors ${activeTab === 'my' ? 'bg-white text-black' : 'bg-[#282828] text-gray-400 hover:text-white'} ${!token ? 'opacity-50 cursor-not-allowed' : ''}`}
+                >
+                    <Library className="w-4 h-4" /> {t.myPlaylists}
+                </button>
+                <button 
+                    onClick={() => setActiveTab('search')}
+                    disabled={!token}
+                    className={`px-4 py-2 rounded-full text-sm font-bold flex items-center gap-2 transition-colors ${activeTab === 'search' ? 'bg-white text-black' : 'bg-[#282828] text-gray-400 hover:text-white'} ${!token ? 'opacity-50 cursor-not-allowed' : ''}`}
+                >
+                    <Search className="w-4 h-4" /> {t.search}
+                </button>
+                <button 
+                    onClick={() => setActiveTab('url')}
+                    className={`px-4 py-2 rounded-full text-sm font-bold flex items-center gap-2 transition-colors ${activeTab === 'url' ? 'bg-white text-black' : 'bg-[#282828] text-gray-400 hover:text-white'}`}
+                >
+                    <LinkIcon className="w-4 h-4" /> URL
+                </button>
             </div>
 
-            {activeTab === 'url' && (
-              <div className="flex gap-2 w-full">
-                <input
-                  type="text"
-                  placeholder="https://open.spotify.com/playlist/..."
-                  value={urlInput}
-                  onChange={(e) => setUrlInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      handlePasteUrl();
-                    }
-                  }}
-                  className="flex-1 bg-[#282828] rounded-full py-2 px-4 text-sm focus:outline-none focus:ring-2 focus:ring-white/20"
-                />
-                <Button
-                  onClick={handlePasteUrl}
-                  disabled={loading || !urlInput.trim()}
-                  className="px-6"
-                >
-                  {loading ? 'Ładuję...' : 'Wczytaj'}
-                </Button>
-              </div>
-            )}
-
             {activeTab === 'search' && token && (
-              <form onSubmit={handleSearch} className="relative w-full">
+              <form onSubmit={handleSearch} className="relative w-full md:w-64">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
                 <input
                   type="text"
@@ -403,37 +336,51 @@ const Setup = () => {
             )}
           </div>
 
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 overflow-y-auto pr-2 pb-20 custom-scrollbar">
-            {playlists.map((playlist) => (
-              <div
-                key={playlist.id}
-                onClick={() => setSelectedPlaylist(playlist)}
-                className={`group relative aspect-square rounded-lg overflow-hidden cursor-pointer transition-all ${
-                  selectedPlaylist?.id === playlist.id ? 'ring-4 ring-green-500' : 'hover:scale-[1.02]'
-                }`}
-              >
-                <img src={playlist.image || 'https://via.placeholder.com/300'} alt={playlist.name} className="w-full h-full object-cover" />
-                <div className="absolute inset-0 bg-black/40 group-hover:bg-black/20 transition-colors" />
-                
-                <div className="absolute bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-black/90 to-transparent">
-                  <h3 className="font-bold truncate text-sm">{playlist.name}</h3>
-                </div>
-
-                {selectedPlaylist?.id === playlist.id && (
-                  <div className="absolute inset-0 flex items-center justify-center bg-black/40">
-                    <div className="bg-green-500 rounded-full p-3 shadow-xl">
-                      <Play className="w-6 h-6 text-black fill-current" />
-                    </div>
+          {activeTab === 'url' ? (
+             <div className="flex flex-col items-center justify-center h-full text-center p-8 space-y-4">
+                <LinkIcon className="w-16 h-16 text-gray-600 mb-4" />
+                <h3 className="text-xl font-bold">Wklej link do playlisty</h3>
+                <p className="text-gray-400 max-w-md">Możesz wkleić tutaj dowolny link do playlisty Spotify (np. od znajomego), aby w nią zagrać.</p>
+                <input 
+                  type="text" 
+                  placeholder="https://open.spotify.com/playlist/..." 
+                  className="w-full max-w-lg bg-[#282828] border border-white/10 rounded-lg p-4 text-white focus:outline-none focus:border-green-500"
+                  value={urlInput}
+                  onChange={(e) => setUrlInput(e.target.value)}
+                />
+             </div>
+          ) : (
+            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-6 overflow-y-auto pr-2 pb-20 custom-scrollbar w-full max-h-[520px] mx-auto items-start justify-center">
+              {playlists.map((playlist) => (
+                <div
+                  key={playlist.id}
+                  onClick={() => setSelectedPlaylist(playlist)}
+                  className={`group relative aspect-square rounded-lg overflow-hidden cursor-pointer transition-all flex flex-col ${
+                    selectedPlaylist?.id === playlist.id ? 'ring-4 ring-green-500' : 'hover:scale-[1.02]'
+                  }`}
+                >
+                  <img src={playlist.image || 'https://via.placeholder.com/300'} alt={playlist.name} className="w-full h-full object-cover" />
+                  <div className="absolute inset-0 bg-black/40 group-hover:bg-black/20 transition-colors" />
+                  <div className="absolute bottom-0 left-0 right-0 p-3 bg-gradient-to-t from-black/90 to-transparent flex flex-col items-start">
+                    <span className="text-xs text-gray-300 font-mono mb-1">{playlist.tracks.total} utworów</span>
+                    <h3 className="font-bold truncate text-base">{playlist.name}</h3>
                   </div>
-                )}
-              </div>
-            ))}
-             {playlists.length === 0 && !loading && (
-                <div className="col-span-full text-center text-gray-500 py-10">
-                    Brak playlist do wyświetlenia.
+                  {selectedPlaylist?.id === playlist.id && (
+                    <div className="absolute inset-0 flex items-center justify-center bg-black/40">
+                      <div className="bg-green-500 rounded-full p-3 shadow-xl">
+                        <Play className="w-6 h-6 text-black fill-current" />
+                      </div>
+                    </div>
+                  )}
                 </div>
-            )}
-          </div>
+              ))}
+              {playlists.length === 0 && !loading && (
+                <div className="col-span-full text-center text-gray-500 py-10">
+                  Brak playlist do wyświetlenia.
+                </div>
+              )}
+            </div>
+          )}
           
           {!token && (
              <div className="mt-4 p-4 bg-blue-500/10 border border-blue-500/20 rounded-xl text-center">

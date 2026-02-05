@@ -1,316 +1,329 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { playTrack } from '../lib/spotify';
 import { useNavigate } from 'react-router-dom';
 import { useGameStore } from '../store/gameStore';
 import { Layout } from '../components/Layout';
 import { Button } from '../components/ui/Button';
-import { Clock, SkipForward, Play, Pause, Check, X, Search, LogOut, Volume2, Users } from 'lucide-react';
+import { Clock, Play, Pause, Check, X, Search, LogOut, Volume2 } from 'lucide-react';
 import { translations } from '../lib/translations';
 import { playSfx } from '../lib/sfx';
 
-const Game = () => {
-  const navigate = useNavigate();
-  const { 
-    tracks, 
-    currentRound, 
-    roundsCount, 
-    score, 
-    addScore, 
-    nextRound, 
-    isGameActive, 
-    gameMode,
-    roomType,
-    language,
-    leaveRoom
-  } = useGameStore();
+export default function Game() {
+    const navigate = useNavigate();
+    const {
+        tracks,
+        currentRound,
+        roundsCount,
+        score,
+        addScore,
+        nextRound,
+        isGameActive,
+        gameMode,
+        roomType,
+        language,
+        leaveRoom,
+        token,
+        broadcastMessage
+    } = useGameStore();
+    const t = translations[language];
+    const [timeLeft, setTimeLeft] = useState(30);
+    const [isPlaying, setIsPlaying] = useState(false);
+    const [choices, setChoices] = useState<any[]>([]);
+    const [selectedChoice, setSelectedChoice] = useState<string | null>(null);
+    const [isRoundOver, setIsRoundOver] = useState(false);
+    const [correctAnswer, setCorrectAnswer] = useState<string | null>(null);
+    const [typedAnswer, setTypedAnswer] = useState('');
+    const [filteredTracks, setFilteredTracks] = useState<any[]>([]);
+    const [showUnmuteOverlay, setShowUnmuteOverlay] = useState(false);
+    const audioRef = useRef<HTMLAudioElement | null>(null);
+    const timerRef = useRef<NodeJS.Timeout | null>(null);
+    const [player, setPlayer] = useState<any>(null);
+    const [deviceId, setDeviceId] = useState<string | null>(null);
 
-  const t = translations[language];
-
-  const [timeLeft, setTimeLeft] = useState(30);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [choices, setChoices] = useState<any[]>([]);
-  const [selectedChoice, setSelectedChoice] = useState<string | null>(null);
-  const [isRoundOver, setIsRoundOver] = useState(false);
-  const [correctAnswer, setCorrectAnswer] = useState<string | null>(null);
-  const [typedAnswer, setTypedAnswer] = useState('');
-  const [filteredTracks, setFilteredTracks] = useState<any[]>([]);
-  const [showUnmuteOverlay, setShowUnmuteOverlay] = useState(false);
-  const [isHost, setIsHost] = useState(false);
-
-  const audioRef = useRef<HTMLAudioElement | null>(null);
-  const timerRef = useRef<NodeJS.Timeout | null>(null);
-  const playerRef = useRef<any>(null);
-
-  const stopTimer = () => {
-    if (timerRef.current) {
-      clearInterval(timerRef.current);
-      timerRef.current = null;
-    }
-  };
-
-  const startTimer = () => {
-    stopTimer();
-    timerRef.current = setInterval(() => {
-      setTimeLeft(prev => {
-        if (prev <= 1) {
-          handleTimeUp();
-          return 0;
+    // Timer logic
+    const stopTimer = () => {
+        if (timerRef.current) {
+            clearInterval(timerRef.current);
+            timerRef.current = null;
         }
-        return prev - 1;
-      });
-    }, 1000);
-  };
+    };
 
-  // Round Logic
-  useEffect(() => {
-    if (!isGameActive || currentRound > roundsCount) {
-      setTimeout(() => navigate('/results'), 100);
-      return;
-    }
+    const startTimer = () => {
+        stopTimer();
+        timerRef.current = setInterval(() => {
+            setTimeLeft(prev => {
+                if (prev <= 1) {
+                    endRound();
+                    return 0;
+                }
+                return prev - 1;
+            });
+        }, 1000);
+    };
 
-    const track = tracks[currentRound - 1];
-    if (!track) return;
+    const endRound = () => {
+        stopTimer();
+        setIsRoundOver(true);
+        if (audioRef.current) audioRef.current.pause();
+        setIsPlaying(false);
+        setTimeout(() => {
+            handleNextRound();
+        }, 1500);
+    };
 
-    // Reset round state
-    setTimeLeft(30);
-    setSelectedChoice(null);
-    setIsRoundOver(false);
-    setTypedAnswer('');
-    setCorrectAnswer(null);
-    
-    // Reset Audio
-    setIsPlaying(false);
-    setShowUnmuteOverlay(false);
-    
-    // Initialize Spotify Web Playback SDK for all modes (requires login)
-    // @ts-ignore - Spotify Web Playback SDK is loaded globally
-    if (window.Spotify) {
-      initializeSpotifyPlayer(track.uri);
-    }
-
-    // Prepare Choices
-    if (gameMode === 'ABCD') {
-      const wrongChoices = tracks
-        .filter(t => t.id !== track.id)
-        .sort(() => 0.5 - Math.random())
-        .slice(0, 3);
-      setChoices([...wrongChoices, track].sort(() => 0.5 - Math.random()));
-    } else if (gameMode === 'List') {
-        setFilteredTracks(tracks.sort((a, b) => a.name.localeCompare(b.name)));
-    }
-
-    startTimer();
-
-    return () => stopTimer();
-  }, [currentRound, tracks, isGameActive]);
-
-  // Initialize Spotify Web Playback SDK
-  const initializeSpotifyPlayer = async (uri: string) => {
-    try {
-      const token = localStorage.getItem('spotify_access_token');
-      if (!token) return;
-
-      // @ts-ignore - Spotify Web Playback SDK is loaded globally
-      const player = new window.Spotify.Player({
-        name: 'SpotiQuiz Player',
-        getOAuthToken: (cb: any) => { cb(token); },
-        volume: 0.5
-      });
-
-      // Error handling
-      player.addListener('initialization_error', ({ message }: any) => {
-        console.error('Spotify initialization error:', message);
-      });
-
-      player.addListener('authentication_error', ({ message }: any) => {
-        console.error('Spotify authentication error:', message);
-      });
-
-      player.addListener('account_error', ({ message }: any) => {
-        console.error('Spotify account error:', message);
-      });
-
-      player.addListener('playback_error', ({ message }: any) => {
-        console.error('Spotify playback error:', message);
-      });
-
-      // Playback events
-      player.addListener('player_state_changed', (state: any) => {
-        if (state) {
-          setIsPlaying(state.paused === false);
-        }
-      });
-
-      // Ready
-      player.addListener('ready', ({ device_id }: any) => {
-        console.log('Spotify player ready:', device_id);
-        playerRef.current = player;
-        
-        // Start playback
-        player.activateElement().then(() => {
-          player.connect();
-          player.resume();
-        });
-      });
-
-      // Connect to Spotify
-      await player.connect();
-
-    } catch (error) {
-      console.error('Error initializing Spotify player:', error);
-    }
-  };
-
-  const playSpotifyTrack = async (uri: string) => {
-    if (!playerRef.current) return;
-
-    try {
-      await playerRef.current.addTracksToQueue([uri]);
-      await playerRef.current.skipToNext();
-      setIsPlaying(true);
-    } catch (error) {
-      console.error('Error playing Spotify track:', error);
-    }
-  };
-
-  const handleTimeUp = () => {
-    stopTimer();
-    const track = tracks[currentRound - 1];
-    setCorrectAnswer(track.id);
-    setIsRoundOver(true);
-    if (audioRef.current) audioRef.current.pause();
-    setIsPlaying(false);
-    playSfx.error();
-  };
-
-  const handleAnswer = (answerId: string) => {
-    if (isRoundOver) return;
-    
-    setSelectedChoice(answerId);
-    const track = tracks[currentRound - 1];
-    const isCorrect = answerId === track.id;
-    
-    if (isCorrect) {
-      addScore(100 + (timeLeft * 10));
-      playSfx.success();
-    } else {
-      playSfx.error();
-    }
-    
-    setCorrectAnswer(track.id);
-    endRound();
-  };
-
-  const handleTypeAnswer = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (isRoundOver) return;
-
-    const track = tracks[currentRound - 1];
-    const cleanAnswer = typedAnswer.toLowerCase().trim();
-    const cleanCorrect = track.name.toLowerCase().trim();
-    
-    const isCorrect = cleanCorrect.includes(cleanAnswer) && cleanAnswer.length > 3;
-
-    if (isCorrect) {
-        addScore(100 + (timeLeft * 10));
-        setSelectedChoice('correct-typed');
-        playSfx.success();
-    } else {
-        setSelectedChoice('wrong-typed');
-        playSfx.error();
-    }
-
-    setCorrectAnswer(track.id);
-    endRound();
-  };
-  
-  // Search Filter for List Mode
-  useEffect(() => {
-    if (gameMode === 'List') {
-        if (!typedAnswer) {
-            setFilteredTracks(tracks);
+    const handleNextRound = () => {
+        if (currentRound >= roundsCount) {
+            navigate('/results');
         } else {
-            const query = typedAnswer.toLowerCase();
-            setFilteredTracks(tracks.filter(t => 
-                t.name.toLowerCase().includes(query) || 
-                t.artist.toLowerCase().includes(query)
-            ));
+            nextRound();
+            if (roomType === 'Online') {
+                broadcastMessage('next_round', { round: currentRound + 1 });
+            }
         }
-    }
-  }, [typedAnswer, tracks, gameMode]);
+    };
 
-  const endRound = () => {
-    stopTimer();
-    setIsRoundOver(true);
-    if (audioRef.current) audioRef.current.pause();
-    setIsPlaying(false);
-  };
+    const handleAnswer = (id: string) => {
+        if (isRoundOver) return;
+        setSelectedChoice(id);
+        setCorrectAnswer(tracks[currentRound - 1].id);
+        if (id === tracks[currentRound - 1].id) {
+            addScore(400);
+            playSfx.success();
+        } else {
+            playSfx.error();
+        }
+        setIsRoundOver(true);
+        if (roomType === 'Online') {
+            broadcastMessage('player_answer', { 
+                playerId: 'self', 
+                answer: id, 
+                correct: id === tracks[currentRound - 1].id 
+            });
+        }
+        setTimeout(() => {
+            handleNextRound();
+        }, 1500);
+    };
 
-  const togglePlay = async () => {
-    if (playerRef.current) {
-      // Use Spotify Web Playback SDK
-      if (isPlaying) {
-        await playerRef.current.pause();
-      } else {
-        await playerRef.current.resume();
-      }
-    }
-  };
+    const handleTypeAnswer = (e: React.FormEvent) => {
+        e.preventDefault();
+        if (isRoundOver) return;
+        if (typedAnswer.trim().toLowerCase() === tracks[currentRound - 1].name.trim().toLowerCase()) {
+            addScore(400);
+            playSfx.success();
+            setCorrectAnswer(tracks[currentRound - 1].id);
+        } else {
+            playSfx.error();
+            setCorrectAnswer(tracks[currentRound - 1].id);
+        }
+        setIsRoundOver(true);
+        if (roomType === 'Online') {
+            broadcastMessage('player_answer', { 
+                playerId: 'self', 
+                answer: typedAnswer, 
+                correct: typedAnswer.trim().toLowerCase() === tracks[currentRound - 1].name.trim().toLowerCase() 
+            });
+        }
+        setTimeout(() => {
+            handleNextRound();
+        }, 1500);
+    };
 
-  const handleNextRound = () => {
-    if (currentRound >= roundsCount) {
-      navigate('/results');
-    } else {
-      nextRound();
-    }
-  };
+    const togglePlay = async () => {
+        if (!audioRef.current) return;
+        if (isPlaying) {
+            audioRef.current.pause();
+            setIsPlaying(false);
+        } else {
+            try {
+                await audioRef.current.play();
+                setIsPlaying(true);
+                setShowUnmuteOverlay(false);
+            } catch (e) {
+                setShowUnmuteOverlay(true);
+            }
+        }
+    };
 
-  const handleExit = () => {
-    if (audioRef.current) audioRef.current.pause();
-    leaveRoom();
-    navigate('/');
-  };
+    const handleExit = () => {
+        if (audioRef.current) audioRef.current.pause();
+        if (player && typeof player.pause === 'function') player.pause();
+        leaveRoom();
+        navigate('/');
+    };
 
-  const handleForceStart = async () => {
-    if (playerRef.current) {
-      try {
-        await playerRef.current.resume();
-        setIsPlaying(true);
+    const handleForceStart = async () => {
         setShowUnmuteOverlay(false);
-      } catch (e) {
-        console.error("Spotify manual start failed", e);
-      }
+        if (audioRef.current) {
+            try {
+                await audioRef.current.play();
+                setIsPlaying(true);
+            } catch (e) {
+                setIsPlaying(false);
+            }
+        }
+    };
+
+    // Web Playback SDK loader
+    useEffect(() => {
+        if (!token) return;
+        if ((window as any).Spotify) return;
+        const script = document.createElement('script');
+        script.src = 'https://sdk.scdn.co/spotify-player.js';
+        script.async = true;
+        document.body.appendChild(script);
+        return () => {
+            document.body.removeChild(script);
+        };
+    }, [token]);
+
+    // Web Playback SDK init
+    useEffect(() => {
+        if (!token || player) return;
+        (window as any).onSpotifyWebPlaybackSDKReady = () => {
+            const p = new (window as any).Spotify.Player({
+                name: 'SpotiQuiz Player',
+                getOAuthToken: (cb: any) => { cb(token); },
+                volume: 0.8
+            });
+            p.addListener('ready', ({ device_id }: any) => {
+                setDeviceId(device_id);
+            });
+            p.addListener('not_ready', ({ device_id }: any) => {
+                if (deviceId === device_id) setDeviceId(null);
+            });
+            p.connect();
+            setPlayer(p);
+        };
+    }, [token, player, deviceId]);
+
+    // Round logic
+    useEffect(() => {
+        if (!isGameActive || currentRound > roundsCount) {
+            setTimeout(() => navigate('/results'), 100);
+            return;
+        }
+        const track = tracks[currentRound - 1];
+        if (!track) return;
+        setTimeLeft(30);
+        setSelectedChoice(null);
+        setIsRoundOver(false);
+        setTypedAnswer('');
+        setCorrectAnswer(null);
+        setIsPlaying(false);
+        setShowUnmuteOverlay(false);
+        if (gameMode === 'ABCD') {
+            const otherTracks = tracks.filter(t => t.id !== track.id);
+            const randomChoices = [track, ...otherTracks.sort(() => 0.5 - Math.random()).slice(0, 3)];
+            setChoices(randomChoices.sort(() => 0.5 - Math.random()));
+        }
+        if (gameMode === 'List') {
+            setFilteredTracks(tracks);
+        }
+        if (token && deviceId && track.uri) {
+            playTrack(token, deviceId, track.uri).then(() => {
+                setIsPlaying(true);
+                setShowUnmuteOverlay(false);
+            }).catch(() => {
+                setIsPlaying(false);
+                setShowUnmuteOverlay(true);
+            });
+        } else if (audioRef.current && track.preview_url) {
+            audioRef.current.pause();
+            audioRef.current.currentTime = 0;
+            audioRef.current.src = track.preview_url;
+            try {
+                audioRef.current.play();
+                setIsPlaying(true);
+            } catch {
+                setIsPlaying(false);
+            }
+        }
+        startTimer();
+    }, [isGameActive, currentRound, roundsCount, token, deviceId, tracks, gameMode]);
+
+    // List mode filtering
+    useEffect(() => {
+        if (gameMode === 'List') {
+            setFilteredTracks(
+                tracks.filter(track =>
+                    track.name.toLowerCase().includes(typedAnswer.toLowerCase()) ||
+                    track.artist.toLowerCase().includes(typedAnswer.toLowerCase())
+                )
+            );
+        }
+    }, [typedAnswer, tracks, gameMode]);
+
+    // Hidden Audio Element
+    const AudioElement = (
+        <audio
+            ref={audioRef}
+            onError={() => setShowUnmuteOverlay(true)}
+            onCanPlay={() => setShowUnmuteOverlay(false)}
+        />
+    );
+
+    // Common Header Component to avoid code duplication
+    const GameHeader = () => (
+        <div className="flex items-center justify-between mb-8 px-4 bg-black/20 p-4 rounded-xl">
+            <div>
+                <span className="text-xs font-bold text-gray-500 uppercase tracking-widest block">{t.rounds}</span>
+                <div className="text-xl font-bold">{currentRound} <span className="text-gray-600 text-sm">/ {roundsCount}</span></div>
+            </div>
+            
+            <div className="flex items-center gap-4">
+                <div className="flex flex-col items-center">
+                    <Clock className={`w-4 h-4 mb-1 ${timeLeft < 10 ? 'text-red-500 animate-pulse' : 'text-gray-400'}`} />
+                    <span className={`font-mono font-bold text-xl ${timeLeft < 10 ? 'text-red-500' : 'text-white'}`}>{timeLeft}s</span>
+                </div>
+                {/* Mini Play Button in Header */}
+                <button 
+                    onClick={togglePlay}
+                    className="bg-white/10 hover:bg-white/20 p-2 rounded-full transition-colors"
+                >
+                    {isPlaying ? <Pause className="w-5 h-5 fill-white" /> : <Play className="w-5 h-5 fill-white" />}
+                </button>
+            </div>
+
+            <div className="text-right">
+                <span className="text-xs font-bold text-gray-500 uppercase tracking-widest block">{t.score}</span>
+                <div className="text-xl font-bold text-green-400">{score}</div>
+            </div>
+        </div>
+    );
+
+    // Answer Reveal Component (shown after round)
+    const AnswerReveal = () => {
+        if (!isRoundOver) return null;
+        const track = tracks[currentRound - 1];
+        return (
+            <div className="mb-6 animate-fade-in flex items-center gap-4 bg-[#181818] p-3 rounded-lg border border-white/10">
+                <img src={track.image} alt="Cover" className="w-14 h-14 rounded shadow-md" />
+                <div className="text-left overflow-hidden">
+                    <div className="text-xs text-gray-400 uppercase tracking-wider">{t.answerWas}</div>
+                    <div className="text-base font-bold truncate text-white">{track.name}</div>
+                    <div className="text-sm text-green-400 truncate">{track.artist}</div>
+                </div>
+            </div>
+        );
+    };
+
+    const NextRoundButton = () => {
+        if (!isRoundOver) return null;
+        return (
+            <div className="mt-6 flex justify-center animate-fade-in-up">
+                <Button size="lg" onClick={handleNextRound} className="px-10 py-6 text-lg">
+                    {currentRound === roundsCount ? t.gameOver : t.nextRound}
+                </Button>
+            </div>
+        );
     }
-  };
 
-  // --------------------------------------------------------------------------
-  // RENDER
-  // --------------------------------------------------------------------------
-
-  // Hidden Audio Element
-  const AudioElement = (
-      <audio 
-          ref={audioRef} 
-          onError={(e) => {
-              const target = e.target as HTMLAudioElement;
-              console.error("Audio tag error:", e, "Src:", target.src, "Error Code:", target.error?.code, "Message:", target.error?.message);
-              // If source is not supported, we might try to just log it for now
-              if (target.error?.code === MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED) {
-                  console.warn("Media Error: Source not supported. This might be due to a dead URL or codec issue.");
-              }
-              setShowUnmuteOverlay(true);
-          }}
-          onCanPlay={() => {
-              // console.log("Audio ready to play");
-          }}
-      />
-  );
-
-  // Host Mode
-  if (roomType === 'LocalHost') {
+    // --- RENDER ---
     return (
         <Layout>
             {AudioElement}
-            <div className="absolute top-20 left-4 z-40">
+            <div className="absolute top-24 left-4 z-40">
                 <Button variant="ghost" onClick={handleExit} className="text-gray-400 hover:text-white bg-black/50 backdrop-blur-md">
                     <LogOut className="w-5 h-5 mr-2" />
                     {t.backToHome}
@@ -328,252 +341,113 @@ const Game = () => {
                 </div>
             )}
 
-            <div className="max-w-2xl mx-auto text-center space-y-8 pt-10">
-                <div className="text-sm uppercase tracking-widest text-gray-500 font-bold">
-                    {t.rounds} {currentRound} / {roundsCount}
-                </div>
+            <div className="max-w-3xl mx-auto w-full pb-8 pt-8 flex flex-col justify-center h-full min-h-[60vh]">
                 
-                <div className="py-12 relative">
-                    <div className={`w-64 h-64 rounded-full bg-black border-4 border-[#282828] mx-auto flex items-center justify-center shadow-2xl relative ${isPlaying ? 'animate-spin-slow' : ''}`}>
-                         <div className="absolute inset-0 rounded-full bg-[repeating-radial-gradient(#222_0,#111_2px,#222_4px)] opacity-50" />
-                         <img 
-                            src={isRoundOver ? tracks[currentRound-1].image : 'https://i.scdn.co/image/ab67616d0000b2735f8f553f'} 
-                            className={`w-24 h-24 rounded-full object-cover z-10 ${!isRoundOver && 'blur-sm'}`} 
-                            alt="Cover"
-                         />
-                         <div className="w-8 h-8 bg-black rounded-full absolute z-20 border-2 border-[#333]" />
-                    </div>
-                </div>
+                {/* 1. Header with Stats & Play Button */}
+                <GameHeader />
 
-                <div className="space-y-4">
-                     {isRoundOver ? (
-                         <div className="animate-fade-in">
-                             <h2 className="text-3xl font-bold text-white mb-2">{tracks[currentRound-1].name}</h2>
-                             <p className="text-xl text-green-400">{tracks[currentRound-1].artist}</p>
-                         </div>
-                     ) : (
-                         <div className="text-gray-500 animate-pulse text-2xl font-mono">
-                             ???
-                         </div>
-                     )}
-                </div>
+                {/* 2. Result Reveal (Only shows when round ends, compact) */}
+                <AnswerReveal />
 
-                <div className="flex items-center justify-center gap-6">
-                    <Button variant="ghost" className="rounded-full w-14 h-14 p-0" onClick={togglePlay}>
-                        {isPlaying ? <Pause className="fill-current" /> : <Play className="fill-current ml-1" />}
-                    </Button>
-                    
-                    {isRoundOver && (
-                         <Button onClick={handleNextRound} className="animate-bounce">
-                             {t.nextRound} <SkipForward className="ml-2 w-4 h-4" />
-                         </Button>
+                {/* 3. Game Area (Input/Buttons) */}
+                <div className="px-2 w-full">
+                    {gameMode === 'ABCD' ? (
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                            {choices.map((choice) => {
+                                const isSelected = selectedChoice === choice.id;
+                                const isCorrect = correctAnswer === choice.id;
+                                const showResult = isRoundOver;
+                                let btnClass = "h-20 text-left px-5 text-sm md:text-base transition-all border-2";
+                                if (showResult && isCorrect) btnClass += " bg-green-500 text-black border-green-500";
+                                else if (showResult && isSelected && !isCorrect) btnClass += " bg-red-500 text-white border-red-500";
+                                else if (isSelected) btnClass += " bg-white text-black scale-[1.01] border-white";
+                                else btnClass += " bg-[#282828] text-gray-300 border-transparent hover:bg-[#333] hover:border-white/20";
+                                return (
+                                    <button
+                                        key={choice.id}
+                                        onClick={() => handleAnswer(choice.id)}
+                                        disabled={isRoundOver}
+                                        className={`rounded-xl font-bold relative overflow-hidden group ${btnClass}`}
+                                    >
+                                        <div className="relative z-10 flex items-center justify-between gap-2">
+                                            <div className="flex flex-col overflow-hidden">
+                                                <span className="truncate w-full block">{choice.name}</span>
+                                                <span className="text-xs opacity-60 font-normal truncate block">{choice.artist}</span>
+                                            </div>
+                                            {showResult && isCorrect && <Check className="w-5 h-5 flex-shrink-0" />}
+                                            {showResult && isSelected && !isCorrect && <X className="w-5 h-5 flex-shrink-0" />}
+                                        </div>
+                                    </button>
+                                );
+                            })}
+                        </div>
+                    ) : gameMode === 'Type' ? (
+                        <div className="max-w-xl mx-auto w-full">
+                            <form onSubmit={handleTypeAnswer} className="relative">
+                                <input
+                                    type="text"
+                                    value={typedAnswer}
+                                    onChange={(e) => setTypedAnswer(e.target.value)}
+                                    disabled={isRoundOver}
+                                    placeholder="Wpisz tytuł utworu..."
+                                    className="w-full bg-[#282828] border-2 border-white/10 rounded-xl py-5 px-6 text-lg focus:outline-none focus:border-green-500 focus:bg-[#333] transition-all"
+                                    autoFocus
+                                />
+                                <Button 
+                                    type="submit" 
+                                    className="absolute right-2 top-2 bottom-2" 
+                                    disabled={isRoundOver || !typedAnswer}
+                                >
+                                    Zgadnij
+                                </Button>
+                            </form>
+                        </div>
+                    ) : (
+                        <div className="max-w-xl mx-auto relative w-full">
+                            <div className="relative mb-3">
+                                <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 w-5 h-5" />
+                                <input
+                                    type="text"
+                                    value={typedAnswer}
+                                    onChange={(e) => setTypedAnswer(e.target.value)}
+                                    disabled={isRoundOver}
+                                    placeholder={t.searchPlaylist}
+                                    className="w-full bg-[#282828] border-2 border-white/10 rounded-xl py-4 pl-12 pr-6 text-lg focus:outline-none focus:border-green-500 focus:bg-[#333] transition-all"
+                                    autoFocus
+                                />
+                            </div>
+                            <div className="h-[300px] overflow-y-auto custom-scrollbar bg-[#181818] rounded-xl border border-white/5">
+                                {filteredTracks.map(track => {
+                                    const isSelected = selectedChoice === track.id;
+                                    const isCorrect = correctAnswer === track.id;
+                                    let bgClass = "hover:bg-[#282828]";
+                                    if (isRoundOver) {
+                                        if (isCorrect) bgClass = "bg-green-500/20 text-green-400";
+                                        else if (isSelected) bgClass = "bg-red-500/20 text-red-400";
+                                    }
+                                    return (
+                                        <button
+                                            key={track.id}
+                                            onClick={() => handleAnswer(track.id)}
+                                            disabled={isRoundOver}
+                                            className={`w-full text-left p-4 border-b border-white/5 last:border-0 flex items-center justify-between transition-colors ${bgClass}`}
+                                        >
+                                            <div className="overflow-hidden">
+                                                <div className="font-bold truncate">{track.name}</div>
+                                                <div className="text-xs text-gray-500 truncate">{track.artist}</div>
+                                            </div>
+                                            {isRoundOver && isCorrect && <Check className="w-4 h-4 text-green-500 flex-shrink-0" />}
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                        </div>
                     )}
+                    
+                    {/* 4. Next Round Button */}
+                    <NextRoundButton />
                 </div>
-
-                {!isRoundOver && (
-                    <div className="w-full bg-[#282828] h-2 rounded-full overflow-hidden max-w-md mx-auto">
-                        <div 
-                            className="bg-green-500 h-full transition-all duration-1000 linear"
-                            style={{ width: `${(timeLeft / 30) * 100}%` }}
-                        />
-                    </div>
-                )}
             </div>
         </Layout>
     );
-  }
-
-  // Solo Mode
-  return (
-    <Layout>
-      {AudioElement}
-      <div className="absolute top-24 left-4 z-40">
-         <Button variant="ghost" onClick={handleExit} className="text-gray-400 hover:text-white bg-black/50 backdrop-blur-md">
-             <LogOut className="w-5 h-5 mr-2" />
-             {t.backToHome}
-         </Button>
-      </div>
-
-      {showUnmuteOverlay && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm">
-              <div className="text-center">
-                  <p className="text-white mb-4 text-xl">Kliknij, aby włączyć dźwięk</p>
-                  <Button onClick={handleForceStart} size="lg" className="animate-bounce">
-                      <Volume2 className="w-8 h-8 mr-2" /> Włącz Muzykę
-                  </Button>
-              </div>
-          </div>
-      )}
-
-      <div className="max-w-2xl mx-auto w-full pb-8 pt-8">
-        {/* Game Stats Header */}
-        <div className="flex items-center justify-between mb-8 px-4">
-            <div>
-                <span className="text-xs font-bold text-gray-500 uppercase tracking-widest">{t.rounds}</span>
-                <div className="text-2xl font-bold">{currentRound} <span className="text-gray-600 text-lg">/ {roundsCount}</span></div>
-            </div>
-            
-            <div className="flex flex-col items-center">
-                <Clock className={`w-5 h-5 mb-1 ${timeLeft < 10 ? 'text-red-500 animate-pulse' : 'text-gray-400'}`} />
-                <span className={`font-mono font-bold text-xl ${timeLeft < 10 ? 'text-red-500' : 'text-white'}`}>
-                    {timeLeft}s
-                </span>
-            </div>
-
-            <div className="text-right">
-                <span className="text-xs font-bold text-gray-500 uppercase tracking-widest">{t.score}</span>
-                <div className="text-2xl font-bold text-green-400">{score}</div>
-            </div>
-        </div>
-
-        {/* Visualizer / Cover */}
-        <div className="mb-10 relative group mx-4">
-            <div className="aspect-video bg-[#181818] rounded-2xl border border-white/5 flex items-center justify-center overflow-hidden relative shadow-2xl">
-                 {isRoundOver ? (
-                     <div className="absolute inset-0 animate-fade-in flex flex-col items-center justify-center bg-black/80 backdrop-blur-md z-10">
-                         <img src={tracks[currentRound-1].image} className="w-48 h-48 rounded-lg shadow-2xl mb-4" />
-                         <h2 className="text-2xl font-bold text-center px-4">{tracks[currentRound-1].name}</h2>
-                         <p className="text-green-400 font-medium">{tracks[currentRound-1].artist}</p>
-                     </div>
-                 ) : (
-                     <div className="flex gap-1 items-end h-16">
-                         {[...Array(8)].map((_, i) => (
-                             <div key={i} className={`w-3 bg-green-500 rounded-t-full ${isPlaying ? 'animate-music-bar' : 'h-2'}`} style={{ animationDelay: `${i * 0.1}s` }} />
-                         ))}
-                     </div>
-                 )}
-            </div>
-            
-            {/* Play/Pause Overlay */}
-            <button 
-                onClick={togglePlay}
-                className="absolute bottom-4 right-4 bg-green-500 text-black p-3 rounded-full hover:scale-110 transition-transform shadow-lg z-20"
-            >
-                {isPlaying ? <Pause className="fill-current w-5 h-5" /> : <Play className="fill-current w-5 h-5 ml-1" />}
-            </button>
-        </div>
-
-        {/* Game Area */}
-        <div className="px-4">
-            {gameMode === 'ABCD' ? (
-                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                     {choices.map((choice) => {
-                         const isSelected = selectedChoice === choice.id;
-                         const isCorrect = correctAnswer === choice.id;
-                         const showResult = isRoundOver;
-                         
-                         let btnClass = "h-20 text-left px-6 text-sm md:text-base transition-all";
-                         if (showResult && isCorrect) btnClass += " bg-green-500 text-black border-green-500";
-                         else if (showResult && isSelected && !isCorrect) btnClass += " bg-red-500 text-white border-red-500";
-                         else if (isSelected) btnClass += " bg-white text-black scale-[1.02]";
-                         else btnClass += " bg-[#282828] text-gray-300 hover:bg-[#333]";
-
-                         return (
-                             <button
-                                 key={choice.id}
-                                 onClick={() => handleAnswer(choice.id)}
-                                 disabled={isRoundOver}
-                                 className={`rounded-xl font-bold relative overflow-hidden group ${btnClass}`}
-                             >
-                                 <div className="relative z-10 flex items-center justify-between">
-                                     <div className="flex flex-col">
-                                         <span className="line-clamp-1">{choice.name}</span>
-                                         <span className="text-xs opacity-60 font-normal">{choice.artist}</span>
-                                     </div>
-                                     {showResult && isCorrect && <Check className="w-5 h-5" />}
-                                     {showResult && isSelected && !isCorrect && <X className="w-5 h-5" />}
-                                 </div>
-                             </button>
-                         );
-                     })}
-                 </div>
-            ) : gameMode === 'Type' ? (
-                // Type Mode
-                <div className="max-w-md mx-auto">
-                     <form onSubmit={handleTypeAnswer} className="relative">
-                         <input
-                             type="text"
-                             value={typedAnswer}
-                             onChange={(e) => setTypedAnswer(e.target.value)}
-                             disabled={isRoundOver}
-                             placeholder="Wpisz tytuł utworu..."
-                             className="w-full bg-[#282828] border-2 border-white/10 rounded-xl py-4 px-6 text-lg focus:outline-none focus:border-green-500 focus:bg-[#333] transition-all"
-                             autoFocus
-                         />
-                         <Button 
-                            type="submit" 
-                            className="absolute right-2 top-2 bottom-2" 
-                            disabled={isRoundOver || !typedAnswer}
-                         >
-                            Zgadnij
-                         </Button>
-                     </form>
-                     
-                     {isRoundOver && (
-                         <div className="mt-6 text-center animate-fade-in">
-                             <div className="text-gray-400 mb-1">{t.answerWas}</div>
-                             <div className="text-xl font-bold text-green-400">{tracks[currentRound-1].name}</div>
-                         </div>
-                     )}
-                </div>
-            ) : (
-                // List Mode
-                <div className="max-w-md mx-auto relative">
-                    <div className="relative mb-4">
-                         <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 w-5 h-5" />
-                         <input
-                             type="text"
-                             value={typedAnswer}
-                             onChange={(e) => setTypedAnswer(e.target.value)}
-                             disabled={isRoundOver}
-                             placeholder={t.searchPlaylist}
-                             className="w-full bg-[#282828] border-2 border-white/10 rounded-xl py-4 pl-12 pr-6 text-lg focus:outline-none focus:border-green-500 focus:bg-[#333] transition-all"
-                             autoFocus
-                         />
-                    </div>
-                    
-                    <div className="max-h-64 overflow-y-auto custom-scrollbar bg-[#181818] rounded-xl border border-white/5">
-                        {filteredTracks.map(track => {
-                            const isSelected = selectedChoice === track.id;
-                            const isCorrect = correctAnswer === track.id;
-                            
-                            let bgClass = "hover:bg-[#282828]";
-                            if (isRoundOver) {
-                                if (isCorrect) bgClass = "bg-green-500/20 text-green-400";
-                                else if (isSelected) bgClass = "bg-red-500/20 text-red-400";
-                            }
-                            
-                            return (
-                                <button
-                                    key={track.id}
-                                    onClick={() => handleAnswer(track.id)}
-                                    disabled={isRoundOver}
-                                    className={`w-full text-left p-4 border-b border-white/5 last:border-0 flex items-center justify-between transition-colors ${bgClass}`}
-                                >
-                                    <div>
-                                        <div className="font-bold">{track.name}</div>
-                                        <div className="text-xs text-gray-500">{track.artist}</div>
-                                    </div>
-                                    {isRoundOver && isCorrect && <Check className="w-4 h-4 text-green-500" />}
-                                </button>
-                            );
-                        })}
-                    </div>
-                </div>
-            )}
-
-            {/* Next Round Button */}
-            {isRoundOver && (
-                <div className="mt-8 flex justify-center animate-fade-in-up">
-                    <Button size="lg" onClick={handleNextRound} className="px-12">
-                        {currentRound === roundsCount ? t.gameOver : t.nextRound}
-                    </Button>
-                </div>
-            )}
-        </div>
-      </div>
-    </Layout>
-  );
-};
-
-export default Game;
+}

@@ -1,8 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Music, Mic2, Users, Play, LogIn } from 'lucide-react';
 import { useGameStore } from '../store/gameStore';
-import { generateAuthURL, exchangeCodeForToken, getTokenFromUrl } from '../lib/spotify';
+import { redirectToAuthCodeFlow } from '../lib/spotify';
 import { Button } from '../components/ui/Button';
 import { Layout } from '../components/Layout';
 import { Card } from '../components/ui/Card';
@@ -10,36 +10,10 @@ import { translations } from '../lib/translations';
 
 const Home = () => {
   const navigate = useNavigate();
-  const { setToken, setGameSettings, token, language, joinRoom } = useGameStore();
+  const { setGameSettings, token, language, joinRoom } = useGameStore();
   const t = translations[language];
   const [joinCode, setJoinCode] = useState("");
   const [showJoinInput, setShowJoinInput] = useState(false);
-  const [authUrl, setAuthUrl] = useState<string>("");
-
-  useEffect(() => {
-    // Generate auth URL on component mount
-    const initAuthUrl = async () => {
-      const url = await generateAuthURL();
-      setAuthUrl(url);
-    };
-    initAuthUrl();
-
-    // Handle authorization code from redirect
-    const params = getTokenFromUrl();
-    if (params.code) {
-      const handleTokenExchange = async () => {
-        const result = await exchangeCodeForToken(params.code);
-        if (result) {
-          setToken(result.access_token);
-          // Clear the URL
-          window.history.replaceState({}, document.title, window.location.pathname);
-        } else {
-          console.error('Failed to exchange code for token');
-        }
-      };
-      handleTokenExchange();
-    }
-  }, [setToken]);
 
   const handleSoloPlay = () => {
     setGameSettings({ roomType: 'Solo' });
@@ -71,21 +45,26 @@ const Home = () => {
 
         <div className="grid md:grid-cols-3 gap-6 max-w-5xl mx-auto">
           {/* Solo */}
-          <Card className="p-6 hover:border-green-500/50 transition-colors group cursor-pointer h-full" onClick={handleSoloPlay}>
-            <div className="h-12 w-12 bg-green-500/10 rounded-xl flex items-center justify-center mb-4 group-hover:bg-green-500/20 transition-colors mx-auto">
-              <Music className="w-6 h-6 text-green-500" />
-            </div>
-            <h3 className="text-xl font-bold text-white mb-2">{t.soloMode}</h3>
-            <p className="text-gray-400 text-sm">{t.soloDesc}</p>
-          </Card>
+          {token && (
+            <Card className="p-6 hover:border-green-500/50 transition-colors group cursor-pointer h-full" onClick={handleSoloPlay}>
+              <div className="h-12 w-12 bg-green-500/10 rounded-xl flex items-center justify-center mb-4 group-hover:bg-green-500/20 transition-colors mx-auto">
+                <Music className="w-6 h-6 text-green-500" />
+              </div>
+              <h3 className="text-xl font-bold text-white mb-2">{t.soloMode}</h3>
+              <p className="text-gray-400 text-sm">{t.soloDesc}</p>
+            </Card>
+          )}
 
           {/* Host */}
-          <Card className="p-6 hover:border-purple-500/50 transition-colors group cursor-pointer h-full" onClick={handleHostParty}>
+          <Card className={`p-6 hover:border-purple-500/50 transition-colors group cursor-pointer h-full ${!token ? 'opacity-50 cursor-not-allowed' : ''}`} onClick={token ? handleHostParty : undefined}>
             <div className="h-12 w-12 bg-purple-500/10 rounded-xl flex items-center justify-center mb-4 group-hover:bg-purple-500/20 transition-colors mx-auto">
               <Mic2 className="w-6 h-6 text-purple-500" />
             </div>
             <h3 className="text-xl font-bold text-white mb-2">{t.hostMode}</h3>
             <p className="text-gray-400 text-sm">{t.hostDesc}</p>
+            {!token && (
+              <div className="mt-2 text-xs text-gray-500 italic">Wymaga logowania</div>
+            )}
           </Card>
 
           {/* Join */}
@@ -127,14 +106,14 @@ const Home = () => {
               <p className="text-gray-500 text-sm">
                 {t.guest} {t.or} {t.loginSpotify}
               </p>
-              {authUrl && (
-                <a href={authUrl}>
-                  <Button size="lg" className="gap-3 bg-[#1DB954] hover:bg-[#1ed760] text-black font-bold px-8">
-                    <Play className="w-5 h-5 fill-current" />
-                    {t.loginSpotify}
-                  </Button>
-                </a>
-              )}
+              <Button 
+                onClick={redirectToAuthCodeFlow} 
+                size="lg" 
+                className="gap-3 bg-[#1DB954] hover:bg-[#1ed760] text-black font-bold px-8"
+              >
+                <Play className="w-5 h-5 fill-current" />
+                {t.loginSpotify}
+              </Button>
             </div>
           ) : (
              <div className="text-green-400 font-medium flex items-center justify-center gap-2">
